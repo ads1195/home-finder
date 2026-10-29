@@ -31,19 +31,20 @@ const ICONS = {
   references: SVG('<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M20.5 16l-5-5-8.5 8.5"/>'),
   sources: SVG('<path d="M5 12.5a7 7 0 0 1 7 7M5 5.5a14 14 0 0 1 14 14"/><circle cx="6" cy="18" r="1.2"/>'),
   settings: SVG('<path d="M5 20v-6M5 10V4M12 20v-9M12 7V4M19 20v-4M19 12V4"/><path d="M3 14h4M10 7h4M17 16h4" />'),
+  notforus: SVG('<path d="M17 14V3.5M17 14l-3.4 6.3a1.7 1.7 0 0 1-3.2-.9V16H5.9a2 2 0 0 1-2-2.3l1.2-7A2 2 0 0 1 7.1 5H17m0 9h2.5A1.5 1.5 0 0 0 21 12.5v-7A1.5 1.5 0 0 0 19.5 4H17"/>'),
   more: SVG('<circle cx="6" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18" cy="12" r="1.3"/>'),
 };
 const NAV = [
   {id: "matches", icon: ICONS.matches, label: "Matches", main: 1}, {id: "just_over", icon: ICONS.just_over, label: "Over budget", main: 1},
   {id: "all", icon: ICONS.all, label: "All", main: 1}, {id: "feed", icon: ICONS.feed, label: "Feed", main: 1},
-  {id: "review", icon: ICONS.review, label: "Needs review"}, {id: "saved", icon: ICONS.saved, label: "Saved"},
+  {id: "review", icon: ICONS.review, label: "Needs review"}, {id: "saved", icon: ICONS.saved, label: "Saved"}, {id: "notforus", icon: ICONS.notforus, label: "Not for us"},
   {id: "references", icon: ICONS.references, label: "Reference homes"}, {id: "sources", icon: ICONS.sources, label: "Sources"}, {id: "settings", icon: ICONS.settings, label: "Settings"},
 ];
-const TITLES = {matches: "Top matches", just_over: "Just over budget", all: "All fetched", review: "Needs review", saved: "Saved homes", feed: "Notifications", references: "Reference homes", sources: "Source status", settings: "Settings"};
+const TITLES = {matches: "Top matches", just_over: "Just over budget", all: "All fetched", review: "Needs review", saved: "Saved homes", notforus: "Not for us", feed: "Notifications", references: "Reference homes", sources: "Source status", settings: "Settings"};
 function counts() { return (S && S.counts) || {}; }
 function renderNav(route) {
   const c = counts();
-  const badge = id => id === "feed" && c.unread ? `<b class="badge">${c.unread}</b>` : id === "saved" && Fav.count() ? `<b class="badge soft">${Fav.count()}</b>` : id === "matches" && c.matches ? `<b class="badge amber" style="background:var(--brand)">${c.matches}</b>` : id === "just_over" && c.just_over ? `<b class="badge amber">${c.just_over}</b>` : "";
+  const badge = id => id === "feed" && c.unread ? `<b class="badge">${c.unread}</b>` : id === "saved" && Fav.count() ? `<b class="badge soft">${Fav.count()}</b>` : id === "notforus" && Vote.count() ? `<b class="badge soft">${Vote.count()}</b>` : id === "matches" && c.matches ? `<b class="badge amber" style="background:var(--brand)">${c.matches}</b>` : id === "just_over" && c.just_over ? `<b class="badge amber">${c.just_over}</b>` : "";
   const cur = route.tab === "listing" ? lastTab : route.tab;
   const link = n => `<a href="#/${n.id}" class="${n.id === cur ? "on" : ""}"><span class="i">${n.icon}</span><span>${n.label}</span>${badge(n.id)}</a>`;
   const vis = NAV.filter(n => c.show_all || !["all", "review"].includes(n.id));
@@ -80,7 +81,7 @@ async function route() {
   $("#backbtn").hidden = view !== "detail";
   renderNav(r);
   if (view === "page") {
-    ({feed: pageFeed, references: pageRefs, sources: pageSources, settings: pageSettings}[r.tab] || (() => $("#page").innerHTML = "<div class='empty'>Not found</div>"))();
+    ({feed: pageFeed, notforus: pageNotForUs, references: pageRefs, sources: pageSources, settings: pageSettings}[r.tab] || (() => $("#page").innerHTML = "<div class='empty'>Not found</div>"))();
     $("#page").scrollTop = 0;
     return;
   }
@@ -112,7 +113,7 @@ async function renderList(tab, selId) {
    <div class="cards">${(savedRows ? savedRows.map(savedCardHtml) : d.items.map(c => cardHtml(c))).join("") || `<div class="empty" style="grid-column:1/-1">${MODE.offline ? "Nothing cached yet." : (tab === "saved" ? "Nothing saved yet. Tap the ♥ on any home to keep it here." : "No listings in this view yet. Run a poll (⟳) or relax criteria in Settings.")}</div>`}</div>`;
   $("#q").onchange = e => { listState.q = e.target.value; renderList(tab, selId); };
   $("#sort").onchange = e => { listState.sort = e.target.value; renderList(tab, selId); };
-  $$(".card", lv).forEach(el => { el.onclick = e => { if (e.target.closest(".heart,.sharebtn,.note,a")) return; if (el.dataset.ext) return window.open(el.dataset.ext, "_blank", "noopener"); location.hash = `#/${tab}/${el.dataset.id}`; }; if (+el.dataset.id === selId) el.classList.add("sel"); });
+  $$(".card", lv).forEach(el => { el.onclick = e => { if (e.target.closest(".heart,.sharebtn,.downbtn,.note,a")) return; if (el.dataset.ext) return window.open(el.dataset.ext, "_blank", "noopener"); location.hash = `#/${tab}/${el.dataset.id}`; }; if (+el.dataset.id === selId) el.classList.add("sel"); });
 }
 const IC = {confirmed: "✓", contradicted: "✗", not_mentioned: "?"};
 function cardHtml(c, o = {}) {
@@ -120,7 +121,7 @@ function cardHtml(c, o = {}) {
   const bg = c.image ? `style="background-image:url('${esc(c.image)}')"` : "";
   const tag = c.is_new ? '<span class="pill new">New</span>' : c.band === "just_over" ? '<span class="pill over">Over budget</span>' : "";
   const facts = [`${c.bedrooms ?? "?"} bed`, c.property_type ? esc(c.property_type) : ""].filter(Boolean).join(' <span class="dot2">·</span> ');
-  return `<article class="card" data-id="${c.id}" data-key="${esc(Fav.key(c))}"><div class="ph" ${bg}><div class="tags">${tag}</div>${heartHtml(c)}${shareHtml(c)}${c.score != null ? `<span class="scorebub score">${Math.round(c.score)}</span>` : ""}</div>
+  return `<article class="card" data-id="${c.id}" data-key="${esc(Fav.key(c))}"><div class="ph" ${bg}><div class="tags">${tag}</div>${heartHtml(c)}${shareHtml(c)}${downHtml(c)}${c.score != null ? `<span class="scorebub score">${Math.round(c.score)}</span>` : ""}</div>
   <div class="body"><div><span class="price">${gbp(c.price)}</span> <span class="scoreinline scorebub">${c.score != null ? Math.round(c.score) : ""}</span></div>
   <div class="addr">${esc(c.address || c.title)}</div>
   <div class="meta">${facts}</div>
@@ -162,7 +163,7 @@ async function renderDetail(id) {
      ${ev ? areaInfoHtml(ev) : ""}
      ${ev && ev.reasons.length ? `<div class="banner" style="margin-top:8px"><b>Why not a match:</b><ul class="plain">${ev.reasons.map(r => `<li>${esc(r)}</li>`).join("")}</ul></div>` : ""}
      <div class="btnrow">${d.sightings.map(s => `<a class="btn pri" href="${esc(s.url)}" target="_blank" rel="noopener">Open on ${esc(s.source)} ↗</a>`).join("")}
-       <button class="btn savebtn ${Fav.has(d.card) ? "on" : ""}" id="fav" data-heart="${esc(Fav.key(d.card))}"><span class="hi">${HEART}</span><span class="lbl">${Fav.has(d.card) ? "Saved" : "Save"}</span></button><button class="btn sharedetail" id="shr" data-share="${esc(Fav.key(d.card))}" data-url="${esc((d.sightings[0] || {}).url || "")}"><span class="hi">${SHARE_ICON}</span><span class="lbl">Share</span></button><button class="btn danger" id="hide">${l.hidden ? "Unhide" : "Hide"}</button></div>
+       <button class="btn savebtn ${Fav.has(d.card) ? "on" : ""}" id="fav" data-heart="${esc(Fav.key(d.card))}"><span class="hi">${HEART}</span><span class="lbl">${Fav.has(d.card) ? "Saved" : "Save"}</span></button><button class="btn sharedetail" id="shr" data-share="${esc(Fav.key(d.card))}" data-url="${esc((d.sightings[0] || {}).url || "")}"><span class="hi">${SHARE_ICON}</span><span class="lbl">Share</span></button>${downBtnDetail(d.card)}<button class="btn danger" id="hide">${l.hidden ? "Unhide" : "Hide"}</button></div>
      <div id="favnote" ${Fav.has(d.card) ? "" : "hidden"}>${Fav.has(d.card) ? noteHtml(Fav.key(d.card), (Fav.m[Fav.key(d.card)] || {}).note) : ""}</div>
      ${d.card && d.card.fav_boost >= 0.5 ? `<p class="hint">♥ Ranked slightly higher because it resembles homes you saved (+${d.card.fav_boost}).</p>` : ""}<p class="hint">First seen ${fdt(l.first_seen)} (Europe/London) · listed on ${d.sightings.length} source(s): ${d.sightings.map(s => esc(s.source)).join(", ")}</p>
    </div>
@@ -453,4 +454,5 @@ $("#refresh").onclick = async () => { const r = await api("/poll", {method: "POS
 setInterval(() => { if (!document.hidden) { const was = S && S.poll.running; refreshState().then(() => { if (was && !S.poll.running) route(); }); } }, 15000);
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 Fav.sync(true);
+Vote.sync().then(() => { const t = parse().tab; if (Vote.count() && t !== "notforus" && !$("#votesheet")) renderNav(parse()); });
 refreshState().then(route);

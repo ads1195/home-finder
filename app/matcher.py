@@ -1,7 +1,7 @@
 """Hard filters + tri-state checklist + scoring.  Pure functions (no I/O) so they are easy to test."""
 import re
 from .geo import haversine_km
-from . import avoid as _avoid, condition as _cond
+from . import votes as _votes, avoid as _avoid, condition as _cond
 from .private import ideal_home as _ideal_home
 from .private import current_home_default as _chd; CURRENT_HOME_DEFAULT = _chd()
 
@@ -102,6 +102,9 @@ def evaluate(l, routes, analysis, cfg, refs_sim=None, current_home=None):
     passes = all(h["ok"] for h in hard)
     # ---- scoring ----
     w = c["score_weights"]
+    # learned from downvotes: a modest (<= 2x) extra weight, applied ONLY as a penalty where a home falls short of that item -
+    # homes that meet it keep their score, so votes never inflate everyone's score
+    lw = _votes.multipliers()
     parts = {}
     tot_w = 0.0
     anchors = c.get("anchors", [])
@@ -114,9 +117,10 @@ def evaluate(l, routes, analysis, cfg, refs_sim=None, current_home=None):
     tot_w += w["drive"]
     cw = sum(i["weight"] for i in ck.values() if i["mode"] != "off") or 1
     cs = 0
-    for i in ck.values():
+    for k, i in ck.items():
         if i["mode"] == "off": continue
-        cs += i["weight"] * {"confirmed": 1.0, "not_mentioned": 0.25, "contradicted": 0.0}[i["state"]]
+        val = {"confirmed": 1.0, "not_mentioned": 0.25, "contradicted": 0.0}[i["state"]]
+        cs += i["weight"] * (val - (lw.get("ck:" + k, 1.0) - 1) * (1 - val))
     parts["checklist"] = cs / cw * w["checklist"]; tot_w += w["checklist"]
     ws, hits = 0, []
     for name, (rx, pts) in c.get("workspace_boosts", {}).items():
@@ -142,9 +146,9 @@ def evaluate(l, routes, analysis, cfg, refs_sim=None, current_home=None):
     sw = w.get("size", 14)
     if sq and sw:
         parts["size"] = size_curve(sq, ideal) * sw; tot_w += sw
-    vi = vs_ideal(l, text, ck, fp, fl, sq, b, ideal, analysis, c)
+    vi = vs_ideal(l, text, ck, fp, fl, sq, b, ideal, analysis, c, lw)
     iw = w.get("ideal", 35)
-    if iw: parts["ideal"] = vi["fit"] * iw; tot_w += iw
+    if iw: parts["ideal"] = vi["fit_learned"] * iw; tot_w += iw
     bw = w.get("beyond", 3)
     if bw: parts["beyond"] = min(1.0, vi["n_beats"] / 3) * bw; tot_w += bw
     st_ = l.get("_station")
@@ -152,16 +156,24 @@ def evaluate(l, routes, analysis, cfg, refs_sim=None, current_home=None):
         parts["station"] = max(0.0, 1 - st_["km"] / 5.0) * w["station"]
     tot_w += w["station"]
     parts["price"] = (1.0 if band == "in_budget" else 0.3 if band == "just_over" else 0) * w["price"]; tot_w += w["price"]
+    lpen = 0.0
+    for _k in ("drive", "ideal", "size", "price"):
+        _m = lw.get("w:" + _k)
+        if _m and parts.get(_k) is not None and w.get(_k): lpen += (_m - 1) * w[_k] * (1 - min(1.0, max(0.0, parts[_k] / w[_k])))
+    if lpen > 0.001: parts["learned"] = -round(lpen, 3)
     score = round(sum(parts.values()) / tot_w * 100, 1) if tot_w else 0
     # small additive adjustments: crime (-8..+2) and condition (-6..+3)
     adjust = {}
-    if cr: adjust["crime"] = cr["adj"]
+    if cr: adjust["crime"] = round(max(-12.0, cr["adj"] * (lw.get("adj:crime", 1.0) if cr["adj"] < 0 else 1.0)), 1)
     ca = 0.0
     if cond["mild"]: ca -= 3.0
     if cond["good"] and not cond["bad"]: ca += 2.0
     if ph and ph["dated"] >= 0.45: ca -= min(4.0, (ph["dated"] - 0.35) / 0.3 * 4.0)
     elif ph and ph["n"] >= 2 and ph["dated"] <= 0.12: ca += 1.0
-    if ca: adjust["condition"] = round(max(-6.0, min(3.0, ca)), 1)
+    if ca < 0: ca *= lw.get("adj:condition", 1.0)
+    if ca: adjust["condition"] = round(max(-10.0, min(3.0, ca)), 1)
+    fb = l.get("_fb")
+    if fb and fb.get("pen"): adjust["feedback"] = -fb["pen"]
     if adjust: score = round(max(0.0, min(100.0, score + sum(adjust.values()))), 1)
     photo_dated = bool(ph and ph["dated"] >= 0.55)
     cstate = "needs_work" if cond["bad"] else "some_updating" if (cond["mild"] and not cond["good"]) or photo_dated else "ready" if cond["good"] else "unknown"
@@ -179,7 +191,7 @@ def evaluate(l, routes, analysis, cfg, refs_sim=None, current_home=None):
             "checklist": ck, "contradicted_must": contradicted, "unconfirmed_must": unknown,
             "score": score, "score_parts": {k: round(v, 2) for k, v in parts.items()}, "workspace_hits": hits,
             "drive": drive, "station": st_, "vs_current": vs, "vs_ideal": vi, "similarity": refs_sim,
-            "excluded": excluded, "crime": cr, "condition": condition, "adjust": adjust}
+            "excluded": excluded, "crime": cr, "condition": condition, "adjust": adjust, "feedback": (fb or None)}
 
 def merge_checklist(analysis, cfg):
     """Combine text / floorplan / vision evidence into the tri-state checklist."""
@@ -231,7 +243,7 @@ _RX = {
     "detached": r"\bdetached\b",
 }
 
-def vs_ideal(l, text, ck, fp, fl, sq, b, ideal, analysis, c):
+def vs_ideal(l, text, ck, fp, fl, sq, b, ideal, analysis, c, lw=None):
     """Compare a listing with the benchmark.  status: beats | meets | short | unknown (+ points 0..1 used for the fit)."""
     low = (text + " " + (analysis or {}).get("floorplan_text", "")).lower()
     fp_ok = bool(fp.get("usable")) and fp.get("n_labels", 0) >= 6
@@ -302,9 +314,10 @@ def vs_ideal(l, text, ck, fp, fl, sq, b, ideal, analysis, c):
     pts = {"beats": 1.0, "meets": 1.0, "unknown": 0.35, "short": 0.0}
     wsum = sum(r["weight"] for r in rows) or 1
     fit = sum(r["weight"] * (r["pts"] if r.get("pts") is not None else pts[r["status"]]) for r in rows) / wsum
+    lpen = sum(r["weight"] * ((lw or {}).get("ideal:" + r["key"], 1.0) - 1) * (1 - (r["pts"] if r.get("pts") is not None else pts[r["status"]])) for r in rows) / wsum
     fp_rows = [r for r in rows if r["key"] in ("kitchen_family", "kitchen_area", "lounge", "lounge_area", "utility", "wc", "ensuite", "bed_sizes")]
     fp_known = sum(1 for r in fp_rows if r["status"] != "unknown")
     n_beats = sum(1 for r in rows if r["status"] == "beats")
     cnt = {s: sum(1 for r in rows if r["status"] == s) for s in ("beats", "meets", "short", "unknown")}
-    return {"rows": rows, "fit": round(fit, 3), "n_beats": n_beats, "counts": cnt, "fp_known": fp_known, "fp_total": len(fp_rows), "label": ideal.get("label", "Ideal home"),
+    return {"rows": rows, "fit": round(fit, 3), "fit_learned": round(max(0.0, fit - lpen), 3), "n_beats": n_beats, "counts": cnt, "fp_known": fp_known, "fp_total": len(fp_rows), "label": ideal.get("label", "Ideal home"),
             "ideal_sqft": tgt}

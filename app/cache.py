@@ -20,7 +20,7 @@ MIN_GAP = 600                    # ...and never more often than this (seconds), 
 logger = print                   # engine.py swaps in its progress log
 _lock = threading.RLock()
 _wlock = threading.Lock()        # one writer at a time
-D = {"v": 1, "w": 0, "entries": {}, "hidden": {}, "favs": {}, "crime": {}}
+D = {"v": 1, "w": 0, "entries": {}, "hidden": {}, "favs": {}, "crime": {}, "votes": {"items": {}, "meta": {"reset": 0}}}
 _idx = {}                        # "source:source_id" -> entry id
 _sha = None
 _loaded = False
@@ -73,6 +73,10 @@ def _merge(remote):
     cr = D.setdefault("crime", {})
     for k, v in (remote.get("crime") or {}).items():
         if k not in cr or v.get("t", 0) > cr[k].get("t", 0): cr[k] = v
+    vt = D.setdefault("votes", {"items": {}, "meta": {"reset": 0}}); rv = remote.get("votes") or {}
+    for u, it in (rv.get("items") or {}).items():
+        if u not in vt["items"] or (it.get("updated") or 0) > (vt["items"][u].get("updated") or 0): vt["items"][u] = it
+    vt.setdefault("meta", {})["reset"] = max(vt.get("meta", {}).get("reset") or 0, (rv.get("meta") or {}).get("reset") or 0)
     D["w"] = max(D.get("w") or 0, remote.get("w") or 0)
     _reindex()
 
@@ -92,6 +96,10 @@ def load():
             from . import favs
             if D["favs"]: favs.merge(D["favs"])
         except Exception: pass
+        try:
+            from . import votes
+            if D["votes"]["items"] or D["votes"]["meta"].get("reset"): votes.merge(D["votes"]["items"], D["votes"]["meta"])
+        except Exception as e: _log(f"votes load failed: {e}")
         stats.update(loaded=len(D["entries"]), last_error=None)
         _log(f"loaded {len(D['entries'])} entries in {time.time() - t0:.1f}s")
     except Exception as e:
@@ -323,6 +331,14 @@ def set_favs(items):
         new = json.dumps(items, sort_keys=True)
         if new == json.dumps(D["favs"], sort_keys=True): return
         D["favs"] = json.loads(new)
+    _soon()
+
+def set_votes(data):
+    """persist the 'Not for us' votes (private repo only)"""
+    if not ENABLED: return
+    with _lock:
+        if json.dumps(data, sort_keys=True, default=str) == json.dumps(D.get("votes"), sort_keys=True, default=str): return
+        D["votes"] = json.loads(json.dumps(data, default=str))
     _soon()
 
 def status():

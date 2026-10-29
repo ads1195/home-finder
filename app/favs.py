@@ -100,7 +100,7 @@ def boosts():
     saved_set = {u for u, _ in prof}
     out, raw = {}, {}
     rows = db.q("""SELECT l.id, l.price, l.bedrooms, l.property_type, e.data FROM listings l JOIN evaluation e ON e.listing_id=l.id
-                   WHERE l.active=1 AND l.hidden=0 AND e.passes=1""")
+                   WHERE l.active=1 AND l.hidden=0 AND l.down=0 AND e.passes=1""")
     for r in rows:
         if any(s["url"] in saved_set for s in db.q("SELECT url FROM sightings WHERE listing_id=?", (r["id"],))): continue
         ev = json.loads(r["data"]); f = features(r, ev)

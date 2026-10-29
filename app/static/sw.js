@@ -3,9 +3,9 @@
    - /api/listings*, /api/state, /api/refs...: network-first, fall back to last cached copy (offline)
    - /media/* images: cache-first (stale-while-revalidate)
    Also handles web-push + notification clicks. */
-const VER = "v13";
+const VER = "v14";
 const SHELL = "shell-" + VER, DATA = "data-" + VER, MEDIA = "media-" + VER;
-const SHELL_FILES = ["/static/style.css", "/static/app.js", "/static/favs.js", "/static/vendor/leaflet.js", "/static/vendor/leaflet.css",
+const SHELL_FILES = ["/static/style.css", "/static/app.js", "/static/favs.js", "/static/votes.js", "/static/vendor/leaflet.js", "/static/vendor/leaflet.css",
   "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 // Never cache an HTML page (e.g. the sign-in page) in place of a CSS/JS/image file.

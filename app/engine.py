@@ -2,7 +2,7 @@
 import os, json, re, threading, time, traceback
 from pathlib import Path
 import numpy as np
-from . import db, geo, http, textanalysis, layout, embed, vision, refs, notify, stations, push, favs, cache, avoid, crime, condition, snapshot
+from . import db, geo, http, textanalysis, layout, embed, vision, refs, notify, stations, push, favs, cache, avoid, crime, condition, snapshot, votes
 from .config import DATA
 from .engine_io import fetch_file
 from .matcher import evaluate, listing_text
@@ -221,6 +221,8 @@ def evaluate_listing(lid, cfg, refset=None, analyse=True):
         except Exception: pass
     try: l["_photo_cond"] = condition.photo_condition(listing_embs(lid))
     except Exception: pass
+    try: l["_fb"] = votes.feedback(l)       # small penalty from 'not for us' votes (near / same street / similar photos)
+    except Exception: pass
     ev = evaluate(l, get_routes(lid), an, cfg, None, refs.current_home())
     sim = None
     if refset is not None:
@@ -245,7 +247,7 @@ def curated(cfg=None):
     cfg = cfg or db.config()
     tm = cfg["criteria"].get("top_matches") or {}
     rows = db.q("""SELECT e.listing_id id, e.score s, e.band b FROM evaluation e JOIN listings l ON l.id=e.listing_id
-                   WHERE l.active=1 AND l.hidden=0 AND e.passes=1 ORDER BY e.score DESC""")
+                   WHERE l.active=1 AND l.hidden=0 AND l.down=0 AND e.passes=1 ORDER BY e.score DESC""")
     out = {"matches": [], "just_over": [], "passing": {"matches": 0, "just_over": 0}}
     try: bst = favs.boosts()      # modest 'similar to your saved homes' nudge (passing listings only, capped)
     except Exception: bst = {}
@@ -356,6 +358,8 @@ def run_poll(trigger="manual"):
             except Exception as e:
                 log(f"detail failed {sname} {sid_}: {e}")
         log(f"detail pages fetched: {fetched}")
+        try: votes.apply()
+        except Exception as e: log(f"votes apply failed: {e}")
         # evaluate everything active
         refset = refs.reference_set()
         if not refset[0] and not refset[1]: refset = None
@@ -436,6 +440,23 @@ def filter_counts():
         if a < 0: out["condition_penalised"] += 1
         elif a > 0: out["condition_boosted"] += 1
     return out
+
+_rs = {"t": None}
+def rescore_all():
+    """re-score every active listing (no notifications): used after votes change the learned weights"""
+    if not _poll_lock.acquire(blocking=False): return      # a poll is running: it re-scores everything at the end anyway
+    try:
+        cfg = db.config(); refset = refs.reference_set()
+        if not refset[0] and not refset[1]: refset = None
+        for r in db.q("SELECT id FROM listings WHERE active=1"):
+            try: evaluate_listing(r["id"], cfg, refset)
+            except Exception: traceback.print_exc()
+    finally: _poll_lock.release()
+
+def rescore_soon(delay=6):
+    t = _rs["t"]
+    if t: t.cancel()
+    _rs["t"] = threading.Timer(delay, rescore_all); _rs["t"].daemon = True; _rs["t"].start()
 
 def re_evaluate_all():
     cfg = db.config(); refset = refs.reference_set()

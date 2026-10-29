@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS listings(
   property_type TEXT, tenure TEXT, description TEXT, features TEXT, images TEXT, floorplans TEXT,
   agent TEXT, status_text TEXT, listed_at TEXT, extra TEXT,
   first_seen REAL, last_seen REAL, active INTEGER DEFAULT 1, detail_done INTEGER DEFAULT 0,
-  street_key TEXT, hidden INTEGER DEFAULT 0, favourite INTEGER DEFAULT 0
+  street_key TEXT, hidden INTEGER DEFAULT 0, favourite INTEGER DEFAULT 0, down INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS ix_listings_pc ON listings(postcode);
 CREATE TABLE IF NOT EXISTS sightings(
@@ -61,6 +61,8 @@ def conn():
 def init():
     c = conn()
     c.executescript(SCHEMA)
+    try: c.execute("ALTER TABLE listings ADD COLUMN down INTEGER DEFAULT 0")   # 'Not for us' (downvoted) homes
+    except Exception: pass
     c.commit()
     if get_setting("config") is None:
         set_setting("config", default_config())

@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request, Response, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from . import db, engine, geo, refs, push, embed, vision, layout, favs, cache, snapshot, http as phttp
+from . import db, engine, geo, refs, push, embed, vision, layout, favs, cache, snapshot, votes, http as phttp
 from .config import DATA, ROOT, default_config
 from .sources.agent import detect_platform
 from .notify import dispatch
@@ -110,7 +110,7 @@ def card(l, ev, an, srcs, url=None, boost=0):
             "score": round(ev["score"] + boost, 1) if ev else None, "base_score": ev["score"] if ev else None, "fav_boost": boost or 0,
             "url": url, "image_remote": (l["images"][0] if l["images"] else None), "feat": favs.features(l, ev), "band": ev["band"] if ev else None, "passes": bool(ev and ev["passes"]),
             "reasons": ev["reasons"][:4] if ev else [], "agent": l["agent"], "status_text": l["status_text"],
-            "first_seen": l["first_seen"], "listed_at": l["listed_at"], "favourite": l["favourite"], "hidden": l["hidden"],
+            "first_seen": l["first_seen"], "listed_at": l["listed_at"], "favourite": l["favourite"], "hidden": l["hidden"], "down": bool(l.get("down")), "suspect": votes.suspects(ev),
             "share": favs.share_info(ev), "sources": srcs, "drive": {k.split(" - ")[0][:30]: round(v["drive_min"]) for k, v in (ev["drive"].items() if ev else [])},
             "drive_full": {k: {"min": round(v["drive_min"]), "km": round(v["straight_km"], 1), "est": v.get("method") == "estimate"} for k, v in (ev["drive"].items() if ev else [])},
             "checklist": {k: {"state": v["state"], "label": v["label"], "mode": v["mode"]} for k, v in ck.items()},
@@ -121,7 +121,7 @@ def card(l, ev, an, srcs, url=None, boost=0):
 @app.get("/api/listings")
 def listings(tab: str = "matches", q: str = "", sort: str = "score", hidden: int = 0):
     rows = db.q("""SELECT l.*, e.data AS ev, a.data AS an FROM listings l LEFT JOIN evaluation e ON e.listing_id=l.id
-                   LEFT JOIN analysis a ON a.listing_id=l.id WHERE l.active=1 AND l.hidden=?""", (hidden,))
+                   LEFT JOIN analysis a ON a.listing_id=l.id WHERE l.active=1 AND l.down=0 AND l.hidden=?""", (hidden,))
     out = []
     cur = engine.curated()
     try: bst = favs.boosts()
@@ -150,7 +150,7 @@ def listings(tab: str = "matches", q: str = "", sort: str = "score", hidden: int
     return {"items": out, "counts": counts, "meta": meta}
 
 def counts_summary():
-    r = db.q("SELECT e.passes p, e.band b, e.data d FROM listings l JOIN evaluation e ON e.listing_id=l.id WHERE l.active=1 AND l.hidden=0")
+    r = db.q("SELECT e.passes p, e.band b, e.data d FROM listings l JOIN evaluation e ON e.listing_id=l.id WHERE l.active=1 AND l.hidden=0 AND l.down=0")
     cur = engine.curated()
     m, j = len(cur["matches"]), len(cur["just_over"])
     return {"matches": m, "just_over": j, "show_all": bool(db.config().get("ui", {}).get("show_all_fetched")),
@@ -207,6 +207,51 @@ def favourites_live():
         srcs = [x["source"] for x in db.q("SELECT source FROM sightings WHERE listing_id=?", (l["id"],))]
         out[u] = card(l, ev, json.loads(a["data"]) if a else None, srcs, u, 0)
     return {"items": out}
+
+# ------------------------------------------------------------------ 'Not for us' (downvotes) + what was learned
+def _votes_changed():
+    votes.apply(); cache.set_votes(votes.export()); engine.rescore_soon()
+
+@app.post("/api/downvotes/sync")
+async def downvotes_sync(request: Request):
+    """Browser localStorage is one copy, this server copy (persisted in the private cache repo) the other; last-write-wins per url."""
+    j = await request.json()
+    before = json.dumps(votes.export()["items"], sort_keys=True, default=str)
+    merged = votes.merge(j.get("items") or {})
+    if json.dumps(votes.export()["items"], sort_keys=True, default=str) != before: _votes_changed()
+    return {"items": merged}
+
+@app.get("/api/downvotes")
+def downvotes_list():
+    """Homes marked 'Not for us' (for the morning/evening routine: skip these).  `id` is the current listing id, if it is still listed."""
+    out = []
+    for e in sorted(votes.active(), key=lambda e: -e["updated"]):
+        r = db.q1("SELECT l.id FROM sightings s JOIN listings l ON l.id=s.listing_id WHERE s.url=? OR s.url LIKE ? LIMIT 1", (e["url"], e["url"] + "#%"))
+        out.append({"url": e["url"], "id": r["id"] if r else None, "address": e["snap"].get("address"), "price": e["snap"].get("price"),
+                    "reasons": e["reasons"], "reason_labels": [votes.LABEL[x] for x in e["reasons"]], "note": e["note"], "voted_at": e["updated"] / 1000.0})
+    return {"count": len(out), "items": out, "urls": [x["url"] for x in out], "ids": [x["id"] for x in out if x["id"] is not None]}
+
+@app.get("/api/downvotes/live")
+def downvotes_live():
+    """Fresh cards for the homes marked 'Not for us' that are still in the current fetch (matched by URL)."""
+    urls = {e["url"] for e in votes.active()}; out = {}
+    for r in db.q("SELECT s.url, s.listing_id FROM sightings s JOIN listings l ON l.id=s.listing_id WHERE l.active=1"):
+        u = favs.norm_url(r["url"])
+        if u not in urls or u in out: continue
+        l = engine.get_listing(r["listing_id"]); e = db.q1("SELECT data FROM evaluation WHERE listing_id=?", (l["id"],)); a = db.q1("SELECT data FROM analysis WHERE listing_id=?", (l["id"],))
+        srcs = [x["source"] for x in db.q("SELECT source FROM sightings WHERE listing_id=?", (l["id"],))]
+        out[u] = card(l, json.loads(e["data"]) if e else None, json.loads(a["data"]) if a else None, srcs, u, 0)
+    return {"items": out}
+
+@app.get("/api/learned")
+def learned_get(): return votes.learned()
+
+@app.post("/api/learned/reset")
+def learned_reset():
+    votes.reset(); _votes_changed(); return {"ok": True, **votes.learned()}
+
+@app.get("/api/reasons")
+def reasons_list(): return {"items": [{"id": i, "label": l} for i, l in votes.REASONS]}
 
 # ------------------------------------------------------------------ state / poll
 def mem_mb():

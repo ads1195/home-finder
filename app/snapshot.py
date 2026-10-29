@@ -95,10 +95,14 @@ def restore():
         L["rows"] = [x for x in L["rows"] if (x[ci["last_seen"]] or 0) > cut]
         keep = {x[ci["id"]] for x in L["rows"]}
         if not keep: _log("snapshot has nothing recent enough"); return None
+        cache.load()          # also loads the 'Not for us' votes, so downvoted homes are never visible, not even briefly
         c = db.conn()
         _insert("listings", L)
         for t in TABLES: _insert(t, snap[t], keep)
         if snap.get("settings", {}).get("baseline_done"): db.set_setting("baseline_done", True)
+        try:
+            from . import votes; votes.apply()      # inside the same transaction: downvoted homes are never visible, not even for a moment
+        except Exception as e: _log(f"votes apply failed: {e}")
         c.commit()
         state.update(restored_at=snap["ts"], restored_n=len(keep), saved_at=snap["ts"], saved_n=snap.get("n", len(keep)), bytes=len(r.content), error=None)
         _log(f"restored {len(keep)} listings (saved {time.strftime('%H:%M', time.localtime(snap['ts']))}) in {time.time() - t0:.1f}s")
