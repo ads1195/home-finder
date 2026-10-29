@@ -112,7 +112,7 @@ async function renderList(tab, selId) {
    <div class="cards">${(savedRows ? savedRows.map(savedCardHtml) : d.items.map(c => cardHtml(c))).join("") || `<div class="empty" style="grid-column:1/-1">${MODE.offline ? "Nothing cached yet." : (tab === "saved" ? "Nothing saved yet. Tap the ♥ on any home to keep it here." : "No listings in this view yet. Run a poll (⟳) or relax criteria in Settings.")}</div>`}</div>`;
   $("#q").onchange = e => { listState.q = e.target.value; renderList(tab, selId); };
   $("#sort").onchange = e => { listState.sort = e.target.value; renderList(tab, selId); };
-  $$(".card", lv).forEach(el => { el.onclick = e => { if (e.target.closest(".heart,.note,a")) return; if (el.dataset.ext) return window.open(el.dataset.ext, "_blank", "noopener"); location.hash = `#/${tab}/${el.dataset.id}`; }; if (+el.dataset.id === selId) el.classList.add("sel"); });
+  $$(".card", lv).forEach(el => { el.onclick = e => { if (e.target.closest(".heart,.sharebtn,.note,a")) return; if (el.dataset.ext) return window.open(el.dataset.ext, "_blank", "noopener"); location.hash = `#/${tab}/${el.dataset.id}`; }; if (+el.dataset.id === selId) el.classList.add("sel"); });
 }
 const IC = {confirmed: "✓", contradicted: "✗", not_mentioned: "?"};
 function cardHtml(c, o = {}) {
@@ -120,7 +120,7 @@ function cardHtml(c, o = {}) {
   const bg = c.image ? `style="background-image:url('${esc(c.image)}')"` : "";
   const tag = c.is_new ? '<span class="pill new">New</span>' : c.band === "just_over" ? '<span class="pill over">Over budget</span>' : "";
   const facts = [`${c.bedrooms ?? "?"} bed`, c.property_type ? esc(c.property_type) : ""].filter(Boolean).join(' <span class="dot2">·</span> ');
-  return `<article class="card" data-id="${c.id}" data-key="${esc(Fav.key(c))}"><div class="ph" ${bg}><div class="tags">${tag}</div>${heartHtml(c)}${c.score != null ? `<span class="scorebub score">${Math.round(c.score)}</span>` : ""}</div>
+  return `<article class="card" data-id="${c.id}" data-key="${esc(Fav.key(c))}"><div class="ph" ${bg}><div class="tags">${tag}</div>${heartHtml(c)}${shareHtml(c)}${c.score != null ? `<span class="scorebub score">${Math.round(c.score)}</span>` : ""}</div>
   <div class="body"><div><span class="price">${gbp(c.price)}</span> <span class="scoreinline scorebub">${c.score != null ? Math.round(c.score) : ""}</span></div>
   <div class="addr">${esc(c.address || c.title)}</div>
   <div class="meta">${facts}</div>
@@ -161,7 +161,7 @@ async function renderDetail(id) {
      <div class="meta" style="margin-top:6px;gap:6px">${drv.map(([k, v]) => `<span class="pill ${v.drive_min <= (d.anchors.find(a => a.name === k) || {max_drive_min: 25}).max_drive_min ? "ok" : "bad"}">🚗 ${esc(k.split(" - ")[1] ? k.split(" - ")[1].replace(/ \(PRIMARY\)/, "") : k)}: ${Math.round(v.drive_min)} min · ${v.straight_km.toFixed(1)} km${v.method === "estimate" ? " (est.)" : ""}</span>`).join("") || '<span class="hint">drive times pending</span>'}</div>
      ${ev && ev.reasons.length ? `<div class="banner" style="margin-top:8px"><b>Why not a match:</b><ul class="plain">${ev.reasons.map(r => `<li>${esc(r)}</li>`).join("")}</ul></div>` : ""}
      <div class="btnrow">${d.sightings.map(s => `<a class="btn pri" href="${esc(s.url)}" target="_blank" rel="noopener">Open on ${esc(s.source)} ↗</a>`).join("")}
-       <button class="btn savebtn ${Fav.has(d.card) ? "on" : ""}" id="fav" data-heart="${esc(Fav.key(d.card))}"><span class="hi">${HEART}</span><span class="lbl">${Fav.has(d.card) ? "Saved" : "Save"}</span></button><button class="btn danger" id="hide">${l.hidden ? "Unhide" : "Hide"}</button></div>
+       <button class="btn savebtn ${Fav.has(d.card) ? "on" : ""}" id="fav" data-heart="${esc(Fav.key(d.card))}"><span class="hi">${HEART}</span><span class="lbl">${Fav.has(d.card) ? "Saved" : "Save"}</span></button><button class="btn sharedetail" id="shr" data-share="${esc(Fav.key(d.card))}" data-url="${esc((d.sightings[0] || {}).url || "")}"><span class="hi">${SHARE_ICON}</span><span class="lbl">Share</span></button><button class="btn danger" id="hide">${l.hidden ? "Unhide" : "Hide"}</button></div>
      <div id="favnote" ${Fav.has(d.card) ? "" : "hidden"}>${Fav.has(d.card) ? noteHtml(Fav.key(d.card), (Fav.m[Fav.key(d.card)] || {}).note) : ""}</div>
      ${d.card && d.card.fav_boost >= 0.5 ? `<p class="hint">♥ Ranked slightly higher because it resembles homes you saved (+${d.card.fav_boost}).</p>` : ""}<p class="hint">First seen ${fdt(l.first_seen)} (Europe/London) · listed on ${d.sightings.length} source(s): ${d.sightings.map(s => esc(s.source)).join(", ")}</p>
    </div>

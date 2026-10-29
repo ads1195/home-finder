@@ -99,7 +99,7 @@ def card(l, ev, an, srcs, url=None, boost=0):
             "url": url, "image_remote": (l["images"][0] if l["images"] else None), "feat": favs.features(l, ev), "band": ev["band"] if ev else None, "passes": bool(ev and ev["passes"]),
             "reasons": ev["reasons"][:4] if ev else [], "agent": l["agent"], "status_text": l["status_text"],
             "first_seen": l["first_seen"], "listed_at": l["listed_at"], "favourite": l["favourite"], "hidden": l["hidden"],
-            "sources": srcs, "drive": {k.split(" - ")[0][:30]: round(v["drive_min"]) for k, v in (ev["drive"].items() if ev else [])},
+            "share": favs.share_info(ev), "sources": srcs, "drive": {k.split(" - ")[0][:30]: round(v["drive_min"]) for k, v in (ev["drive"].items() if ev else [])},
             "drive_full": {k: {"min": round(v["drive_min"]), "km": round(v["straight_km"], 1), "est": v.get("method") == "estimate"} for k, v in (ev["drive"].items() if ev else [])},
             "checklist": {k: {"state": v["state"], "label": v["label"], "mode": v["mode"]} for k, v in ck.items()},
             "unconfirmed_must": ev["unconfirmed_must"] if ev else [], "station": ev["station"] if ev else None,

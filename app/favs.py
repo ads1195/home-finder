@@ -47,6 +47,18 @@ def features(l, ev):
             "ck": ck, "drive": round(sum(drv) / len(drv), 1) if drv else None,
             "sqft": ((ev.get("vs_current") or {}).get("sqft") or [None])[0]}
 
+def share_info(ev):
+    """ideal-home fit % and a few key wins, for the Share button (no personal data)"""
+    vi = (ev or {}).get("vs_ideal")
+    if not vi: return None
+    ok = {r["key"] for r in vi["rows"] if r["status"] in ("meets", "beats")}
+    names = [("lounge", "separate lounge"), ("kitchen_family", "open-plan family kitchen"), ("utility", "utility"), ("garden", "garden"), ("parking", "front parking")]
+    wins = [n for k, n in names if k in ok]
+    if "wc" in ok and "ensuite" in ok: wins.append("WC + en-suite")
+    elif "wc" in ok: wins.append("downstairs WC")
+    elif "ensuite" in ok: wins.append("en-suite")
+    return {"fit": round(vi["fit"] * 100), "wins": wins}
+
 def feat_sim(a, b):
     if not a or not b: return None
     parts = []

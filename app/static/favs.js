@@ -15,7 +15,7 @@ const Fav = {
   count() { return this.list().length; },
   snap(c) {
     return {id: c.id, title: c.title, address: c.address, price: c.price, image: c.image_remote || c.image, score: c.score, bedrooms: c.bedrooms,
-            bathrooms: c.bathrooms, property_type: c.property_type, band: c.band, agent: c.agent, source: (c.sources || [])[0] || ""};
+            bathrooms: c.bathrooms, share: c.share, property_type: c.property_type, band: c.band, agent: c.agent, source: (c.sources || [])[0] || ""};
   },
   toggle(c) {
     const k = this.key(c), old = this.m[k], on = !(old && old.saved);
@@ -61,6 +61,37 @@ function toggleFav(c) {
   }
   return on;
 }
+/* Share: native share sheet (phones/tablets) or copy to clipboard (desktop). Sends the ORIGINAL portal link, never the dashboard. */
+const SHARE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0L7.5 7.5M12 3l4.5 4.5M5 12v6.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V12"/></svg>';
+function shareHtml(c, cls = "") {
+  const k = Fav.key(c); CARDS[k] = c;
+  return `<button type="button" class="sharebtn ${cls}" data-share="${esc(k)}" aria-label="Share this home" title="Share">${SHARE_ICON}</button>`;
+}
+function sharePayload(c, url) {
+  const s = c.share || {}, bed = c.bedrooms != null ? c.bedrooms + " bed" : "", ty = (c.property_type || "").toLowerCase();
+  const title = [c.price ? gbp(c.price) : "", [bed, ty].filter(Boolean).join(" "), c.address || c.title || ""].filter(Boolean).join(" · ");
+  const bits = [];
+  if (s.fit != null) bits.push(s.fit + "% match to our ideal home");
+  if (s.wins && s.wins.length) bits.push(s.wins.slice(0, 5).join(", "));
+  return {title, text: bits.join(" – ") || "Worth a look", url: url || c.url};
+}
+async function shareHome(c, url) {
+  const p = sharePayload(c, url);
+  if (!p.url) return toast("No listing link to share");
+  if (navigator.share) {
+    try { await navigator.share({title: p.title, text: p.title + "\n" + p.text, url: p.url}); return; }
+    catch (e) { if (e && e.name === "AbortError") return; }
+  }
+  const all = p.title + "\n" + p.text + "\n" + p.url;
+  try { await navigator.clipboard.writeText(all); }
+  catch (_) { const t = document.createElement("textarea"); t.value = all; t.style.cssText = "position:fixed;opacity:0"; document.body.appendChild(t); t.select(); try { document.execCommand("copy"); } catch (__) {} t.remove(); }
+  toast("Copied", 1600);
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest(".sharebtn"); if (!b) return;
+  e.preventDefault(); e.stopPropagation();
+  const c = CARDS[b.dataset.share]; if (c) shareHome(c, b.dataset.url);
+}, true);
 document.addEventListener("click", e => {
   const b = e.target.closest(".heart,.savebtn"); if (!b) return;
   e.preventDefault(); e.stopPropagation();
@@ -86,10 +117,10 @@ async function savedItems() {
 }
 function savedCardHtml({e, c}) {
   if (c) return cardHtml(c, {saved: true, note: e.note});
-  const s = e.snap || {}, k = e.url, card = {id: s.id, url: k, title: s.title, address: s.address, image_remote: s.image, feat: e.feat, sources: [s.source], price: s.price, score: s.score, bedrooms: s.bedrooms};
+  const s = e.snap || {}, k = e.url, card = {id: s.id, url: k, title: s.title, address: s.address, image_remote: s.image, feat: e.feat, sources: [s.source], price: s.price, score: s.score, bedrooms: s.bedrooms, share: s.share, property_type: s.property_type};
   CARDS[k] = card;
   const bg = s.image ? `style="background-image:url('${esc(s.image)}')"` : "";
-  return `<article class="card stale" data-key="${esc(k)}" data-ext="${esc(k)}"><div class="ph" ${bg}><div class="tags"><span class="pill warn">Not in current fetch</span></div>${heartHtml(card)}${s.score != null ? `<span class="scorebub score">${Math.round(s.score)}</span>` : ""}</div>
+  return `<article class="card stale" data-key="${esc(k)}" data-ext="${esc(k)}"><div class="ph" ${bg}><div class="tags"><span class="pill warn">Not in current fetch</span></div>${heartHtml(card)}${shareHtml(card)}${s.score != null ? `<span class="scorebub score">${Math.round(s.score)}</span>` : ""}</div>
   <div class="body"><div><span class="price">${gbp(s.price)}</span></div><div class="addr">${esc(s.address || s.title || k)}</div>
   <div class="meta">${s.bedrooms ?? "?"} bed${s.property_type ? ' <span class="dot2">·</span> ' + esc(s.property_type) : ""}</div>
   <div class="drv">Saved snapshot - may have sold or been withdrawn</div>
