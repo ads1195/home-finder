@@ -6,18 +6,63 @@ from pathlib import Path
 _ocr = None
 _lock = threading.Lock()
 
+import os
+LEAN = os.environ.get("PROPDASH_LEAN") == "1"
+TESSDATA = os.environ.get("TESSDATA_PREFIX") or str(Path(os.environ.get("PROPDASH_DATA", ".")) / "tessdata")
+OCR_MAX_SIDE = int(os.environ.get("PROPDASH_OCR_SIDE", "1700"))
+
 def ocr_available():
-    import os
-    if os.environ.get("PROPDASH_LEAN") == "1": return False   # low-memory hosting: no OCR engine
+    if LEAN:   # low-memory hosting: Tesseract (tesserocr, ~60 MB) instead of RapidOCR/ONNX (~300 MB peak)
+        try:
+            import importlib.util
+            return importlib.util.find_spec("tesserocr") is not None and (Path(TESSDATA) / "eng.traineddata").exists()
+        except Exception:
+            return False
     try:
         import rapidocr_onnxruntime  # noqa
         return True
     except Exception:
         return False
 
+def _ocr_tesseract(path):
+    """two passes (normal + larger scale) merged: Tesseract is scale-sensitive on tiny floorplan labels"""
+    a = _ocr_tesseract_at(path, OCR_MAX_SIDE)
+    b = _ocr_tesseract_at(path, int(OCR_MAX_SIDE * 1.45))
+    ext = a[:]
+    for t in b:
+        if not any(abs(t[0] - u[0]) < 12 + 0.5 * max(t[2], u[2]) and abs(t[1] - u[1]) < 12 + 0.5 * max(t[3], u[3]) for u in a):
+            ext.append(t)
+    return ext
+
+def _ocr_tesseract_at(path, max_side):
+    import tesserocr
+    from PIL import Image
+    with Image.open(path) as im:
+        im = im.convert("L")
+        w, h = im.size; sc = max_side / max(w, h)
+        if abs(sc - 1) > 0.05: im = im.resize((max(1, round(w * sc)), max(1, round(h * sc))), Image.LANCZOS)
+        sc = im.size[0] / w
+        out = []
+        with tesserocr.PyTessBaseAPI(path=TESSDATA, lang="eng", psm=tesserocr.PSM.SPARSE_TEXT) as api:
+            api.SetImage(im)
+            api.Recognize()
+            it = api.GetIterator()
+            if it is not None:
+                level = tesserocr.RIL.TEXTLINE
+                while True:
+                    text = (it.GetUTF8Text(level) or "").strip()
+                    bb = it.BoundingBox(level)
+                    if text and bb:
+                        l, t, r, b = bb
+                        out.append(((l + r) / 2 / sc, (t + b) / 2 / sc, (r - l) / sc, (b - t) / sc, text, it.Confidence(level) / 100.0))
+                    if not it.Next(level): break
+    return out
+
 def ocr_image(path):
     """returns list of (cx, cy, w, h, text, conf)"""
     global _ocr
+    if LEAN:
+        with _lock: return _ocr_tesseract(path)
     with _lock:
         if _ocr is None:
             from rapidocr_onnxruntime import RapidOCR
@@ -193,6 +238,31 @@ def analyse_floorplan(path):
     res = analyse_tokens(toks, size)
     res["file"] = Path(path).name
     return res
+
+def analyse_floorplans(paths):
+    """-> list of (result|None, error|None).  In lean mode OCR runs in a short-lived child process so its RAM goes back to the OS."""
+    paths = [str(p) for p in paths]
+    if not paths: return []
+    if not LEAN or os.environ.get("PROPDASH_OCR_WORKER") == "1":
+        out = []
+        for p in paths:
+            try: out.append((analyse_floorplan(p), None))
+            except Exception as e: out.append((None, str(e)))
+        return out
+    import subprocess, sys, tempfile, json
+    fd, tmp = tempfile.mkstemp(suffix=".json"); os.close(fd)
+    try:
+        r = subprocess.run([sys.executable, "-m", "app.ocr_worker", tmp] + paths, capture_output=True, timeout=900,
+                           env=dict(os.environ, PROPDASH_OCR_WORKER="1"), cwd=str(Path(__file__).resolve().parent.parent))
+        if r.returncode != 0:
+            return [(None, "ocr worker failed: " + (r.stderr or b"")[-200:].decode("utf8", "replace"))] * len(paths)
+        data = json.load(open(tmp))
+        return [(d.get("res"), d.get("err")) for d in data]
+    except Exception as e:
+        return [(None, f"{type(e).__name__}: {e}")] * len(paths)
+    finally:
+        try: os.unlink(tmp)
+        except Exception: pass
 
 def combine(results):
     """merge multiple floorplan results (several sheets) into one summary"""

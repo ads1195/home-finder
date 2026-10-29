@@ -7,3 +7,5 @@ pillow
 numpy
 python-multipart
 pywebpush
+onnxruntime
+tesserocr

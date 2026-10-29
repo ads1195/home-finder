@@ -20,11 +20,24 @@ async function api(path, opt = {}) {
 function toast(msg, ms = 3500) { const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => t.hidden = true, ms); }
 
 /* ------------------------------------------------------------ nav */
+const SVG = p => `<svg viewBox="0 0 24 24" aria-hidden="true">${p}</svg>`;
+const ICONS = {
+  matches: SVG('<polygon points="12 3 14.8 8.8 21 9.6 16.5 14 17.6 20.3 12 17.3 6.4 20.3 7.5 14 3 9.6 9.2 8.8"/>'),
+  just_over: SVG('<path d="M17.5 7a3.7 3.7 0 0 0-7.4 0v4M6.5 12h8.5M6 20.5h12M10.1 11v6c0 2.2-1.2 3.5-4 3.5"/>'),
+  all: SVG('<rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/>'),
+  feed: SVG('<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 20.5a2 2 0 0 1-3.4 0"/>'),
+  review: SVG('<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.3-4.3"/>'),
+  saved: SVG('<path d="M12 20.5s-8-4.8-8-10.7A4.6 4.6 0 0 1 12 7a4.6 4.6 0 0 1 8 2.8c0 5.900-8 10.7-8 10.7z"/>'),
+  references: SVG('<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M20.5 16l-5-5-8.5 8.5"/>'),
+  sources: SVG('<path d="M5 12.5a7 7 0 0 1 7 7M5 5.5a14 14 0 0 1 14 14"/><circle cx="6" cy="18" r="1.2"/>'),
+  settings: SVG('<path d="M5 20v-6M5 10V4M12 20v-9M12 7V4M19 20v-4M19 12V4"/><path d="M3 14h4M10 7h4M17 16h4" />'),
+  more: SVG('<circle cx="6" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18" cy="12" r="1.3"/>'),
+};
 const NAV = [
-  {id: "matches", icon: "⭐", label: "Top matches", main: 1}, {id: "just_over", icon: "💷", label: "Over budget", main: 1},
-  {id: "all", icon: "🏘️", label: "All", main: 1}, {id: "feed", icon: "🔔", label: "Feed", main: 1},
-  {id: "review", icon: "🔎", label: "Needs review"}, {id: "saved", icon: "♥", label: "Saved"},
-  {id: "references", icon: "🖼️", label: "Reference homes"}, {id: "sources", icon: "📡", label: "Sources"}, {id: "settings", icon: "⚙️", label: "Settings"},
+  {id: "matches", icon: ICONS.matches, label: "Matches", main: 1}, {id: "just_over", icon: ICONS.just_over, label: "Over budget", main: 1},
+  {id: "all", icon: ICONS.all, label: "All", main: 1}, {id: "feed", icon: ICONS.feed, label: "Feed", main: 1},
+  {id: "review", icon: ICONS.review, label: "Needs review"}, {id: "saved", icon: ICONS.saved, label: "Saved"},
+  {id: "references", icon: ICONS.references, label: "Reference homes"}, {id: "sources", icon: ICONS.sources, label: "Sources"}, {id: "settings", icon: ICONS.settings, label: "Settings"},
 ];
 const TITLES = {matches: "Top matches", just_over: "Just over budget", all: "All fetched", review: "Needs review", saved: "Saved homes", feed: "Notifications", references: "Reference homes", sources: "Source status", settings: "Settings"};
 function counts() { return (S && S.counts) || {}; }
@@ -36,13 +49,13 @@ function renderNav(route) {
   const vis = NAV.filter(n => c.show_all || !["all", "review"].includes(n.id));
   const isMain = n => c.show_all ? n.main : (n.main || n.id === "saved");
   $("#sidenav").innerHTML = vis.map(link).join("");
-  $("#bottomnav").innerHTML = vis.filter(isMain).map(link).join("") + `<a href="#" id="morebtn" class="${!vis.find(n => n.id === cur && isMain(n)) ? "on" : ""}"><span class="i">☰</span><span>More</span></a>`;
+  $("#bottomnav").innerHTML = vis.filter(isMain).map(link).join("") + `<a href="#" id="morebtn" class="${!vis.find(n => n.id === cur && isMain(n)) ? "on" : ""}"><span class="i">${ICONS.more}</span><span>More</span></a>`;
   $("#morebtn").onclick = e => { e.preventDefault(); openSheet(); };
   $("#sidefoot").textContent = S ? (S.poll.running ? "polling…" : "last poll " + ago((S.poll.last || {}).finished)) : "";
 }
 function openSheet() {
   const sh = $("#sheet"); sh.hidden = false;
-  sh.innerHTML = `<div class="s">${NAV.filter(n => (counts().show_all || !["all", "review"].includes(n.id)) && !(counts().show_all ? n.main : (n.main || n.id === "saved"))).map(n => `<a href="#/${n.id}"><span class="i">${n.icon}</span>${n.label}</a>`).join("")}<a href="#" data-x="logout">🚪 Sign out</a></div>`;
+  sh.innerHTML = `<div class="s">${NAV.filter(n => (counts().show_all || !["all", "review"].includes(n.id)) && !(counts().show_all ? n.main : (n.main || n.id === "saved"))).map(n => `<a href="#/${n.id}"><span class="i">${n.icon}</span>${n.label}</a>`).join("")}<a href="#" data-x="logout">Sign out</a></div>`;
   sh.onclick = e => { if (e.target.closest("[data-x=logout]")) { e.preventDefault(); api("/logout", {method: "POST"}).then(() => location.reload()); } sh.hidden = true; };
 }
 
@@ -87,7 +100,7 @@ async function renderList(tab, selId) {
   try { d = await api(`/listings?tab=${tab}&q=${encodeURIComponent(listState.q)}&sort=${listState.sort}`); }
   catch (e) { lv.innerHTML = `<div class="empty">Could not load listings (${esc(e.message)}).</div>`; return; }
   if (d.counts) { S = S || {}; S.counts = d.counts; renderNav(parse()); }
-  const tabs = [["matches", "⭐ Top matches"], ["just_over", "💷 Just over budget"], ...(d.counts.show_all ? [["all", "All fetched"], ["review", "Needs review"]] : []), ["saved", "♥ Saved"]];
+  const tabs = [["matches", "Top matches"], ["just_over", "Over budget"], ...(d.counts.show_all ? [["all", "All fetched"], ["review", "Needs review"]] : []), ["saved", "Saved"]];
   let savedRows = null; if (tab === "saved") { savedRows = await savedItems(); d.items = savedRows; }
   const sortopts = [["score", "Best score"], ["new", "Newest"], ["price", "Price ↑"]];
   const c = d.counts;
@@ -104,15 +117,14 @@ async function renderList(tab, selId) {
 const IC = {confirmed: "✓", contradicted: "✗", not_mentioned: "?"};
 function cardHtml(c, o = {}) {
   const drv = Object.entries(c.drive_full || {}).map(([k, v]) => `${esc(k.split(" - ")[0])} ${v.min}m${v.est ? "*" : ""}`).join(" · ");
-  const ck = Object.entries(c.checklist).filter(([k, v]) => v.mode !== "off").map(([k, v]) => `<span class="c ${v.state}" title="${esc(v.label)}: ${v.state.replace("_", " ")}">${IC[v.state]} ${esc(shortLabel(k))}</span>`).join("");
   const bg = c.image ? `style="background-image:url('${esc(c.image)}')"` : "";
-  return `<article class="card" data-id="${c.id}" data-key="${esc(Fav.key(c))}"><div class="ph" ${bg}><div class="tags">${c.fav_boost >= 0.5 ? `<span class="pill sim" title="Ranked slightly higher because it resembles homes you saved">♥ like your saved +${c.fav_boost}</span>` : ""}${c.is_new ? '<span class="pill new">NEW</span>' : ""}${c.band === "just_over" ? '<span class="pill over">JUST OVER BUDGET</span>' : ""}</div>${heartHtml(c)}${c.score != null ? `<span class="scorebub score">${Math.round(c.score)}</span>` : ""}</div>
+  const tag = c.is_new ? '<span class="pill new">New</span>' : c.band === "just_over" ? '<span class="pill over">Over budget</span>' : "";
+  const facts = [`${c.bedrooms ?? "?"} bed`, c.property_type ? esc(c.property_type) : ""].filter(Boolean).join(' <span class="dot2">·</span> ');
+  return `<article class="card" data-id="${c.id}" data-key="${esc(Fav.key(c))}"><div class="ph" ${bg}><div class="tags">${tag}</div>${heartHtml(c)}${c.score != null ? `<span class="scorebub score">${Math.round(c.score)}</span>` : ""}</div>
   <div class="body"><div><span class="price">${gbp(c.price)}</span> <span class="scoreinline scorebub">${c.score != null ? Math.round(c.score) : ""}</span></div>
   <div class="addr">${esc(c.address || c.title)}</div>
-  <div class="meta"><span>🛏 ${c.bedrooms ?? "?"}</span>${c.bathrooms ? `<span>🛁 ${c.bathrooms}</span>` : ""}<span>${esc(c.property_type || "")}</span></div>
-  <div class="meta" style="color:var(--mut)">🚗 ${drv || "—"}</div>
-  <div class="ck">${ck}</div>
-  <div class="meta" style="color:var(--mut);font-size:.75rem">${(c.sources || []).map(esc).join(" + ")} · ${esc(c.agent || "")}</div>${o.saved ? noteHtml(Fav.key(c), o.note) : ""}</div></article>`;
+  <div class="meta">${facts}</div>
+  <div class="drv">${drv ? "Drive " + drv : "Drive times pending"}</div>${o.saved ? noteHtml(Fav.key(c), o.note) : ""}</div></article>`;
 }
 const SHORT = {kitchen_family: "Kitchen-diner+family", wc_or_ensuite: "WC/en-suite", utility: "Utility", parking: "Off-street parking", not_overlooked: "Private", garden_size: "Garden"};
 const shortLabel = k => SHORT[k] || k;
@@ -144,18 +156,18 @@ async function renderDetail(id) {
      <div class="btnrow">${d.sightings.map(s => `<a class="btn pri" href="${esc(s.url)}" target="_blank" rel="noopener">Open on ${esc(s.source)} ↗</a>`).join("")}
        <button class="btn savebtn ${Fav.has(d.card) ? "on" : ""}" id="fav" data-heart="${esc(Fav.key(d.card))}"><span class="hi">${HEART}</span><span class="lbl">${Fav.has(d.card) ? "Saved" : "Save"}</span></button><button class="btn danger" id="hide">${l.hidden ? "Unhide" : "Hide"}</button></div>
      <div id="favnote" ${Fav.has(d.card) ? "" : "hidden"}>${Fav.has(d.card) ? noteHtml(Fav.key(d.card), (Fav.m[Fav.key(d.card)] || {}).note) : ""}</div>
-     <p class="hint">First seen ${fdt(l.first_seen)} (Europe/London) · listed on ${d.sightings.length} source(s): ${d.sightings.map(s => esc(s.source)).join(", ")}</p>
+     ${d.card && d.card.fav_boost >= 0.5 ? `<p class="hint">♥ Ranked slightly higher because it resembles homes you saved (+${d.card.fav_boost}).</p>` : ""}<p class="hint">First seen ${fdt(l.first_seen)} (Europe/London) · listed on ${d.sightings.length} source(s): ${d.sightings.map(s => esc(s.source)).join(", ")}</p>
    </div>
    <div class="twocol">
-   ${ev ? sec("✅ Your checklist", checklistHtml(ev), true, "checklist") : ""}
-   ${ev ? sec("🏠 vs your current home", vsHtml(ev, d.current_home, an), true, "vs") : ""}
+   ${ev ? sec("Your checklist", checklistHtml(ev), true, "checklist") : ""}
+   ${ev ? sec("vs your current home", vsHtml(ev, d.current_home, an), true, "vs") : ""}
    </div>
    ${fps.length ? sec(`📐 Floorplan${fps.length > 1 ? "s (" + fps.length + ")" : ""}`, `<div id="fpv"></div><p class="hint">Pinch or double-tap to zoom, drag to pan (mouse: wheel + drag).</p>`, true, "fp") : ""}
-   ${sec("🔬 Layout analysis (floorplan OCR / photos)", layoutHtml(an, ev), false, "layout")}
-   ${sec("🗺️ Map & location", `<div class="map" id="map"></div>${station}${drv.length ? `<table class="t"><tr><th>Anchor</th><th>Drive</th><th>Straight</th></tr>${drv.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${Math.round(v.drive_min)} min${v.method === "estimate" ? " (est.)" : ""}</td><td>${v.straight_km.toFixed(1)} km</td></tr>`).join("")}</table><p class="hint">Drive times: OSRM public demo server (typical daytime, no live traffic); “est.” = straight-line × 1.35 at ~42 km/h.</p>` : ""}`, true, "map")}
-   ${sec("📝 Description", `<div style="white-space:pre-wrap">${esc(l.description || "—")}</div>`, false, "desc")}
-   ${l.features.length ? sec("🔑 Key features", `<ul class="plain">${l.features.map(f => `<li>${esc(f)}</li>`).join("")}</ul>`, false, "feat") : ""}
-   ${ev ? sec("🧮 Hard criteria & score breakdown", hardHtml(ev), false, "hard") : ""}
+   ${sec("Layout analysis (floorplan OCR / photos)", layoutHtml(an, ev), false, "layout")}
+   ${sec("Map & location", `<div class="map" id="map"></div>${station}${drv.length ? `<table class="t"><tr><th>Anchor</th><th>Drive</th><th>Straight</th></tr>${drv.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${Math.round(v.drive_min)} min${v.method === "estimate" ? " (est.)" : ""}</td><td>${v.straight_km.toFixed(1)} km</td></tr>`).join("")}</table><p class="hint">Drive times: OSRM public demo server (typical daytime, no live traffic); “est.” = straight-line × 1.35 at ~42 km/h.</p>` : ""}`, true, "map")}
+   ${sec("Description", `<div style="white-space:pre-wrap">${esc(l.description || "—")}</div>`, false, "desc")}
+   ${l.features.length ? sec("Key features", `<ul class="plain">${l.features.map(f => `<li>${esc(f)}</li>`).join("")}</ul>`, false, "feat") : ""}
+   ${ev ? sec("Hard criteria & score breakdown", hardHtml(ev), false, "hard") : ""}
    <div class="btnrow"><button class="btn" id="reanalyse">↻ Re-run analysis</button></div>
   </div>`;
   // gallery

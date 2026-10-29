@@ -111,6 +111,14 @@ def is_candidate(l, cfg):
 def img_dir(lid):
     d = DATA / "images" / str(lid); d.mkdir(parents=True, exist_ok=True); return d
 
+def _release_memory():
+    """give freed heap back to the OS (matters on a 512 MB host)"""
+    import gc
+    gc.collect()
+    try:
+        import ctypes; ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception: pass
+
 def analyse_listing(lid, cfg, force=False):
     l = get_listing(lid)
     old = db.q1("SELECT data FROM analysis WHERE listing_id=?", (lid,))
@@ -122,20 +130,14 @@ def analyse_listing(lid, cfg, force=False):
     d = img_dir(lid)
     # floorplans -> OCR
     fpres, fpfiles = [], []
-    lean = os.environ.get("PROPDASH_LEAN") == "1"
-    if lean:   # low-memory hosting: keep the first floorplan image for viewing, but no OCR
-        for u in l["floorplans"][:1]:
-            p = fetch_file(u, d / "floorplan0.jpg", 0.2)
-            if p: fpfiles.append(p.name)
-    elif layout.ocr_available():
-        for i, u in enumerate(l["floorplans"][:3]):
+    if layout.ocr_available():
+        for i, u in enumerate(l["floorplans"][: (2 if os.environ.get("PROPDASH_LEAN") == "1" else 3)]):
             p = fetch_file(u, d / f"floorplan{i}.jpg", 0.2)
-            if p:
-                fpfiles.append(p.name)
-                try:
-                    r = layout.analyse_floorplan(p); fpres.append(r)
-                except Exception as e:
-                    an.setdefault("errors", []).append(f"OCR {p.name}: {e}")
+            if p: fpfiles.append(p)
+        for p, (r, err) in zip(fpfiles, layout.analyse_floorplans(fpfiles)):
+            if r: fpres.append(r)
+            if err: an.setdefault("errors", []).append(f"OCR {p.name}: {err}")
+        fpfiles = [p.name for p in fpfiles]
     an["floorplan_files"] = fpfiles
     fp = layout.combine(fpres) if fpres else None
     if fp: 
@@ -147,7 +149,7 @@ def analyse_listing(lid, cfg, force=False):
         for i, u in enumerate(l["images"][: cfg["poll"].get("max_photos_per_listing", 12)]):
             p = fetch_file(u, d / f"photo{i}.jpg", 0.15)
             if p: photos.append(p)
-        embs = [] if lean else [embed.embed_image(p) for p in photos]
+        embs = embed.embed_many(photos)
         embs = [e for e in embs if e is not None]
         if embs: np.save(d / "emb.npy", np.stack(embs))
         an["n_photos"] = len(photos); an["embed_backend"] = embed.status["backend"]
@@ -353,6 +355,7 @@ def run_poll(trigger="manual"):
                     if hard_ok:
                         n_cand += 1
                         analyse_listing(lid, cfg)
+                        _release_memory()
                 evaluate_listing(lid, cfg, refset)
             except Exception as e:
                 log(f"evaluate {lid} failed: {type(e).__name__}: {e}")

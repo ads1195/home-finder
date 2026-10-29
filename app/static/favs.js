@@ -91,7 +91,7 @@ function savedCardHtml({e, c}) {
   const bg = s.image ? `style="background-image:url('${esc(s.image)}')"` : "";
   return `<article class="card stale" data-key="${esc(k)}" data-ext="${esc(k)}"><div class="ph" ${bg}><div class="tags"><span class="pill warn">Not in current fetch</span></div>${heartHtml(card)}${s.score != null ? `<span class="scorebub score">${Math.round(s.score)}</span>` : ""}</div>
   <div class="body"><div><span class="price">${gbp(s.price)}</span></div><div class="addr">${esc(s.address || s.title || k)}</div>
-  <div class="meta"><span>🛏 ${s.bedrooms ?? "?"}</span>${s.bathrooms ? `<span>🛁 ${s.bathrooms}</span>` : ""}<span>${esc(s.property_type || "")}</span></div>
-  <div class="meta" style="color:var(--mut);font-size:.75rem">Saved snapshot · ${esc(s.source || "")} ${esc(s.agent || "")} — may have sold or been withdrawn</div>
+  <div class="meta">${s.bedrooms ?? "?"} bed${s.property_type ? ' <span class="dot2">·</span> ' + esc(s.property_type) : ""}</div>
+  <div class="drv">Saved snapshot - may have sold or been withdrawn</div>
   <div class="btnrow" style="margin:0"><a class="btn pri" href="${esc(k)}" target="_blank" rel="noopener">Open original ↗</a></div>${noteHtml(k, e.note)}</div></article>`;
 }

@@ -6,8 +6,8 @@ USER user
 WORKDIR /home/user/app
 COPY --chown=user requirements.txt .
 RUN pip install --user -r requirements.txt
-ENV PATH=/home/user/.local/bin:$PATH
+ENV PATH=/home/user/.local/bin:$PATH TESSDATA_PREFIX=/home/user/app/tessdata
+RUN mkdir -p tessdata data/models && python -c "import urllib.request as u; u.urlretrieve('https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata','tessdata/eng.traineddata'); u.urlretrieve('https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_quantized.onnx','data/models/clip_vision_q.onnx')"
 COPY --chown=user app ./app
-RUN mkdir -p data
 EXPOSE 10000
 CMD ["sh", "-c", "exec python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000} --log-level warning"]
