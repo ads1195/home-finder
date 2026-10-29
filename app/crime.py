@@ -115,9 +115,9 @@ def rate(e):
     if not e: return None
     med, p90, n = baseline(); ix = index(e); ratio = ix / med if med else 1.0
     if ratio <= 0.6: level, adj = "low", 2.0
-    elif ratio < 1.35: level, adj = "average", 0.0
+    elif ratio < 1.8: level, adj = "average", 0.0
     else:
-        level = "high"; adj = -min(8.0, 3.0 + (ratio - 1.35) * 4.0)
+        level = "high"; adj = -min(8.0, 3.0 + (ratio - 1.8) * 3.0)
     if ix >= p90 and ratio >= 1.5: level = "review"
     return {"level": level, "ratio": round(ratio, 2), "adj": round(adj, 1), "n": e["n"], "v": e["v"], "b": e["b"], "a": e["a"],
             "months": e["m"], "url": ("https://www.police.uk/pu/your-area/" + e["u"] + "/?tab=crimemap") if e.get("u") else None, "baseline": round(med, 1), "base_places": n}
