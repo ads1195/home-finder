@@ -349,7 +349,8 @@ function idealBox(id) {
   const rows = (id.rooms || []).map(r => `<tr><td>${esc(r.name)}</td><td>${esc(r.ft || "")}<br><small>${esc(r.dim || "")}</small></td></tr>`).join("");
   return `<div class="box"><h3>Ideal home (benchmark)</h3><p class="hint">${esc(id.description || "Every listing is compared with this: size, room layout, parking, garden and photos.")}</p>
    <p><b>${id.bedrooms}</b> bed &middot; ~<b>${(id.sqft || 0).toLocaleString("en-GB")}</b> sq ft${id.m2 ? ` (${id.m2} m\u00b2)` : ""}${id.photo_refs ? ` &middot; ${id.photo_refs} reference photos (vectors only)` : ""}</p>
-   ${rows ? `<table class="t"><tr><th>Room</th><th>Size</th></tr>${rows}</table>` : ""}</div>`;
+   ${rows ? `<table class="t"><tr><th>Room</th><th>Size</th></tr>${rows}</table>` : ""}
+   ${(id.references || []).length > 1 ? `<h4>Reference homes (${id.references.length})</h4>` + id.references.map((r, i) => `<p class="hint"><b>${i + 1}. ${esc(r.label || "Reference")}</b>${r.sqft ? ` &middot; ~${r.sqft.toLocaleString("en-GB")} sq ft` : ""}<br>${esc(r.description || "")}</p>`).join("") + `<p class="hint">Homes are scored against both: room sizes use the average of the two, photos use whichever looks closer (a bonus if they resemble both).</p>` : ""}</div>`;
 }
 async function pageRefs() {
   const p = $("#page"); const d = await api("/refs"); const ch = d.current_home;

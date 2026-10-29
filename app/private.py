@@ -84,25 +84,54 @@ GENERIC_IDEAL = {   # benchmark "ideal home": target features. Numbers can be ov
                  "downstairs_wc": True, "ensuite": True, "family_bathroom": True, "garage_or_drive": True, "rear_garden": True},
     "open_plan_m2": 44.0, "lounge_m2": 16.0, "bedroom_m2": [11.0, 9.4, 8.5, 5.4],
     "rooms": [], "sim_range": [0.55, 0.85], "embeddings": None,
+    "extra_refs": [],   # more reference homes: [{label, description, sqft, m2, open_plan_m2, lounge_m2, rooms, sim_range, embeddings}, ...]
 }
 
-def ideal_home():
+def ideal_refs():
+    """all reference homes: the primary benchmark first, then each entry of ideal_home.extra_refs (which inherit anything
+    they don't override, except photo vectors)"""
     import copy
-    return deep_merge(copy.deepcopy(GENERIC_IDEAL), load().get("ideal_home"))
-
-_ideal_emb = None
-def ideal_embeddings():
-    """precomputed CLIP vectors of the ideal home's photos (vectors only; no images) -> list of np.float32 arrays"""
-    global _ideal_emb
-    if _ideal_emb is not None: return _ideal_emb
-    out = []
-    try:
-        e = ideal_home().get("embeddings")
-        if e and e.get("b64"):
-            import base64, numpy as np
-            a = np.frombuffer(base64.b64decode(e["b64"]), dtype=np.float16).astype(np.float32).reshape(-1, int(e.get("dim", 512)))
-            out = [r / (np.linalg.norm(r) or 1) for r in a]
-    except Exception as ex:
-        print(f"[private] ideal embeddings unreadable ({type(ex).__name__})", flush=True)
-    _ideal_emb = out
+    prim = deep_merge(copy.deepcopy(GENERIC_IDEAL), load().get("ideal_home"))
+    extras = prim.pop("extra_refs", None) or []
+    out = [prim]
+    for x in extras:
+        if not isinstance(x, dict): continue
+        base = copy.deepcopy(prim); base["embeddings"] = None
+        out.append(deep_merge(base, x))
     return out
+
+def ideal_home():
+    """the benchmark used for scoring.  With several references the target sizes of the open-plan kitchen and the
+    separate lounge are the average of the references (a blend); photo similarity is handled per reference (see refs.similarity)."""
+    refs_ = ideal_refs()
+    prim = dict(refs_[0])
+    if len(refs_) > 1:
+        for k in ("open_plan_m2", "lounge_m2"):
+            vals = [float(r[k]) for r in refs_ if r.get(k)]
+            if vals: prim[k] = round(sum(vals) / len(vals), 1)
+    prim["n_refs"] = len(refs_)
+    return prim
+
+_ideal_groups = None
+def ideal_embedding_groups():
+    """precomputed CLIP vectors of each reference home's photos (vectors only; no images)
+    -> [{"label": str, "vecs": [np.float32 arrays], "sim_range": [lo, hi]}, ...] (references without photo vectors are skipped)"""
+    global _ideal_groups
+    if _ideal_groups is not None: return _ideal_groups
+    out = []
+    for i, r in enumerate(ideal_refs()):
+        try:
+            e = r.get("embeddings")
+            if e and e.get("b64"):
+                import base64, numpy as np
+                a = np.frombuffer(base64.b64decode(e["b64"]), dtype=np.float16).astype(np.float32).reshape(-1, int(e.get("dim", 512)))
+                out.append({"label": r.get("label") or f"Reference {i + 1}", "sim_range": list(r.get("sim_range") or [0.55, 0.85]),
+                            "vecs": [v / (np.linalg.norm(v) or 1) for v in a]})
+        except Exception as ex:
+            print(f"[private] reference {i + 1} embeddings unreadable ({type(ex).__name__})", flush=True)
+    _ideal_groups = out
+    return out
+
+def ideal_embeddings():
+    """flat list of all reference photo vectors"""
+    return [v for g in ideal_embedding_groups() for v in g["vecs"]]

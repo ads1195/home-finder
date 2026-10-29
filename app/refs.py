@@ -177,12 +177,19 @@ def similarity(listing_embs, listing_ck, refset):
     if not photos and not layouts: return None
     parts, detail = [], {}
     if photos and listing_embs:
-        sims = [max(embed.cos(p, e) for e in listing_embs) for p in photos]
-        m = float(np.mean(sims))
         from . import private
-        lo, hi = (private.ideal_home().get("sim_range") or [0.55, 0.85]) if private.ideal_embeddings() else (0.55, 0.85)
-        s = min(1, max(0, (m - lo) / max(0.01, hi - lo)))
-        parts.append(("photos", s, 0.6)); detail["photo_cos_mean"] = round(m, 3)
+        groups = [(g["vecs"], g["sim_range"]) for g in private.ideal_embedding_groups()]
+        n_priv = sum(len(g[0]) for g in groups)
+        own = photos[: len(photos) - n_priv] if n_priv else photos      # reference_set() appends the private vectors last
+        if own: groups.append((own, groups[0][1] if groups else [0.55, 0.85]))
+        ss, ms = [], []
+        for vecs, (lo, hi) in groups:      # each reference home is scored on its own, against its own calibrated range
+            m = float(np.mean([max(embed.cos(p, e) for e in listing_embs) for p in vecs]))
+            ms.append(m); ss.append(min(1, max(0, (m - lo) / max(0.01, hi - lo))))
+        # best-matching reference counts most; resembling every reference adds a little
+        s = ss[0] if len(ss) == 1 else 0.75 * max(ss) + 0.25 * float(np.mean(ss))
+        parts.append(("photos", s, 0.6)); detail["photo_cos_mean"] = round(max(ms), 3)
+        if len(ss) > 1: detail["photo_by_ref"] = [round(x, 2) for x in ss]
     if layouts:
         vals = []
         for fl in layouts:

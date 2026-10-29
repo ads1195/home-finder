@@ -414,6 +414,8 @@ def index(): return FileResponse(STATIC / "index.html", headers={"Cache-Control"
 
 def ideal_public():
     from . import private
-    i = dict(private.ideal_home()); e = i.pop("embeddings", None)
+    i = dict(private.ideal_home()); e = i.pop("embeddings", None); i.pop("extra_refs", None); i.pop("sim_range", None)
     i["photo_refs"] = len(private.ideal_embeddings())
+    i["references"] = [{"label": r.get("label"), "description": r.get("description"), "sqft": r.get("sqft"), "m2": r.get("m2"),
+                        "bedrooms": r.get("bedrooms"), "rooms": r.get("rooms") or []} for r in private.ideal_refs()]
     return i
