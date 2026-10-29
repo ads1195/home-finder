@@ -59,17 +59,16 @@ function openVote(c) {
   sh.innerHTML = `<div class="vs" role="dialog" aria-label="Not for us">
     <div class="vgrab"></div>
     <div class="vhead"><b>Not for us?</b><span class="vaddr">${esc(c.address || c.title || "")}</span></div>
-    <p class="vhint">What's not right? Pick any that apply${sus.size ? ' · <span class="vdot"></span> dotted = what the scorer already suspects' : ""}</p>
+    <p class="vhint">Tap any reasons (optional) – they help us find better matches. <span class="vdot"></span> Dotted = what we already suspect.</p>
     <div class="vpills">${REASONS.map(([id, l]) => `<button type="button" class="rp ${sus.has(id) ? "sug" : ""}" data-r="${id}" aria-pressed="false">${esc(l)}</button>`).join("")}</div>
     <textarea id="vnote" maxlength="200" rows="1" placeholder="Anything else? (optional, short)"></textarea>
-    <div class="vact"><button type="button" class="btn pri" id="vhide">Hide it</button><button type="button" class="btn" id="vjust">Just hide</button><button type="button" class="vcancel" id="vcancel">Cancel</button></div>
+    <div class="vact"><button type="button" class="btn pri" id="vhide">Not for us</button><button type="button" class="vcancel" id="vcancel">Cancel</button></div>
   </div>`;
   document.body.appendChild(sh);
   sh.onclick = e => { if (e.target === sh) closeVote(); };
-  $$(".rp", sh).forEach(b => b.onclick = () => { const on = b.classList.toggle("on"); b.setAttribute("aria-pressed", on); $("#vhide").textContent = "Hide it" + ($$(".rp.on", sh).length ? ` (${$$(".rp.on", sh).length})` : ""); });
+  $$(".rp", sh).forEach(b => b.onclick = () => { const on = b.classList.toggle("on"); b.setAttribute("aria-pressed", on); const n = $$(".rp.on", sh).length; $("#vhide").innerHTML = "Not for us" + (n ? ` <span class="vcount">· ${n} reason${n > 1 ? "s" : ""}</span>` : ""); });
   $("#vcancel").onclick = closeVote;
   $("#vhide").onclick = () => submitVote(c, $$(".rp.on", sh).map(b => b.dataset.r), $("#vnote").value.trim());
-  $("#vjust").onclick = () => submitVote(c, [], "");
 }
 async function submitVote(c, reasons, note) {
   closeVote();

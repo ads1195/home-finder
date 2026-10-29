@@ -413,10 +413,10 @@ table.t td:nth-child(2){max-width:34%}
 .rp.sug{border:1.5px dashed var(--brand)}
 .rp.on{background:var(--ink);color:#fff;border-color:var(--ink);border-style:solid}
 #vnote{width:100%;margin-top:10px;font:inherit;font-size:.88rem;border:1px solid rgba(20,22,26,.14);border-radius:14px;padding:10px 12px;resize:none;background:#fff;color:var(--ink)}
-#votesheet .vact{display:flex;align-items:center;gap:8px;margin-top:10px;position:sticky;bottom:calc(var(--sab) * -1 - 16px);padding:10px 0 4px;background:linear-gradient(to bottom,rgba(255,255,255,0),#fff 28%)}
-#votesheet .vact .btn{flex:0 0 auto}
-#votesheet .vact .btn.pri{flex:1}
-.vcancel{margin-left:auto;background:none;border:0;color:var(--mut);font:inherit;font-size:.86rem;padding:10px 6px;cursor:pointer}
+#votesheet .vact{display:flex;flex-direction:column;align-items:stretch;gap:2px;margin-top:10px;position:sticky;bottom:calc(var(--sab) * -1 - 16px);padding:10px 0 4px;background:linear-gradient(to bottom,rgba(255,255,255,0),#fff 28%)}
+#votesheet .vact .btn.pri{width:100%;min-height:50px;font-size:1rem}
+.vcount{font-weight:500;opacity:.72;margin-left:4px}
+.vcancel{align-self:center;background:none;border:0;color:var(--mut);font:inherit;font-size:.86rem;padding:10px 6px;cursor:pointer}
 .tundo{margin-left:10px;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);color:#fff;border-radius:99px;font:inherit;font-weight:650;padding:3px 12px;cursor:pointer}
 .card.nfu .ph{filter:grayscale(.55);opacity:.85}
 .whys{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
