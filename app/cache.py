@@ -332,3 +332,24 @@ def touch():
     """mark the cache as changed (crime lookups etc.) so the next write includes it"""
     global _dirty
     _dirty = True
+
+# ---------------- used by snapshot.restore ----------------
+def restore_emb(lid):
+    """write a listing's photo vectors (emb.npy) from the cache, so a restored analysis row is complete"""
+    if not ENABLED: return False
+    try:
+        with _lock:
+            eid, e = _find(keys_for(lid)); emb = (e or {}).get("emb")
+        if not emb: return False
+        a = np.frombuffer(base64.b64decode(emb["b"]), dtype=np.int8).reshape(emb["n"], -1).astype(np.float32)
+        a /= np.maximum(np.linalg.norm(a, axis=1, keepdims=True), 1e-6)
+        d = DATA / "images" / str(lid); d.mkdir(parents=True, exist_ok=True)
+        np.save(d / "emb.npy", a); return True
+    except Exception: return False
+
+def hidden_state(lid):
+    """latest hidden/unhidden decision stored for this listing, or None"""
+    if not ENABLED: return None
+    with _lock:
+        v = [D["hidden"][k] for k in keys_for(lid) if k in D["hidden"]]
+    return max(v, key=lambda x: x[1])[0] if v else None

@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request, Response, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from . import db, engine, geo, refs, push, embed, vision, layout, favs, cache, http as phttp
+from . import db, engine, geo, refs, push, embed, vision, layout, favs, cache, snapshot, http as phttp
 from .config import DATA, ROOT, default_config
 from .sources.agent import detect_platform
 from .notify import dispatch
@@ -33,7 +33,14 @@ def _startup():
     global PASSWORD
     db.init(); refs.ensure_baseline()
     PASSWORD = auth_conf()
-    engine.start_scheduler()
+    def _boot():      # saved results first (so the dashboard is populated within seconds), then the first poll
+        try:
+            with engine._poll_lock:
+                ts = snapshot.restore()
+                if ts: engine.state["restored_at"] = ts
+        except Exception as e: print("snapshot restore failed:", e)
+        engine.start_scheduler()
+    threading.Thread(target=_boot, daemon=True).start()
 
 @app.middleware("http")
 async def guard(request: Request, call_next):
@@ -220,7 +227,7 @@ def get_state():
                      "last": db.get_setting("last_poll")},
             "sources": srcs, "counts": counts_summary(), "total_listings": db.q1("SELECT COUNT(*) c FROM listings")["c"],
             "embed": embed.status, "ocr": layout.ocr_available(), "vision": vision.available(cfg["vision"]),
-            "placeholders": cfg.get("placeholders", []), "time": time.time(), "cache": cache.status(), "mem_mb": mem_mb()}
+            "placeholders": cfg.get("placeholders", []), "time": time.time(), "cache": cache.status(), "snapshot": snapshot.state, "mem_mb": mem_mb()}
 
 @app.post("/api/poll")
 def poll_now():

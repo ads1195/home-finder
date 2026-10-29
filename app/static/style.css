@@ -389,3 +389,5 @@ table.t td:nth-child(2){max-width:34%}
 @media (hover:hover){.sharebtn:hover{background:#fff}}
 .sharedetail{display:inline-flex;align-items:center;gap:8px}
 .sharedetail .hi svg{width:18px;height:18px}
+
+#restorenote{margin:4px 14px 0;font-size:.74rem;color:var(--mut)}

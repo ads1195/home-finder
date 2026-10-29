@@ -3,7 +3,7 @@
    - /api/listings*, /api/state, /api/refs...: network-first, fall back to last cached copy (offline)
    - /media/* images: cache-first (stale-while-revalidate)
    Also handles web-push + notification clicks. */
-const VER = "v12";
+const VER = "v13";
 const SHELL = "shell-" + VER, DATA = "data-" + VER, MEDIA = "media-" + VER;
 const SHELL_FILES = ["/static/style.css", "/static/app.js", "/static/favs.js", "/static/vendor/leaflet.js", "/static/vendor/leaflet.css",
   "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];

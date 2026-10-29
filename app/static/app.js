@@ -445,6 +445,8 @@ async function refreshState() {
   try { S = await api("/state"); } catch (e) { return; }
   const c = $("#pollchip"); c.className = "chip" + (S.poll.running ? " run" : "");
   c.textContent = S.poll.running ? "polling…" : "updated " + ago((S.poll.last || {}).finished);
+  const rn = $("#restorenote"), ra = S.poll.running && S.poll.restored_at;
+  rn.hidden = !ra; if (ra) rn.textContent = "Showing saved results from " + new Date(ra * 1000).toLocaleTimeString("en-GB", {timeZone: "Europe/London", hour: "2-digit", minute: "2-digit"}) + " · checking for new homes…";
   renderNav(parse());
 }
 $("#refresh").onclick = async () => { const r = await api("/poll", {method: "POST"}); toast(r.started ? "Checking all sources…" : "Already running"); refreshState(); };

@@ -2,7 +2,7 @@
 import os, json, re, threading, time, traceback
 from pathlib import Path
 import numpy as np
-from . import db, geo, http, textanalysis, layout, embed, vision, refs, notify, stations, push, favs, cache, avoid, crime, condition
+from . import db, geo, http, textanalysis, layout, embed, vision, refs, notify, stations, push, favs, cache, avoid, crime, condition, snapshot
 from .config import DATA
 from .engine_io import fetch_file
 from .matcher import evaluate, listing_text
@@ -307,6 +307,7 @@ def run_poll(trigger="manual"):
         ensure_anchor_coords(cfg)
         cfg = db.config(); crit = cfg["criteria"]
         pending = []   # (source_obj, normalized listing)
+        ok_sources = 0
         for sc in cfg["sources"]:
             sid = sc["id"]
             if not sc.get("enabled"):
@@ -325,7 +326,7 @@ def run_poll(trigger="manual"):
                 set_status(sid, state="ok", name=sc["name"], type=sc["type"], url=sc.get("url"), last_run=time.time(), count=len(res),
                            message=f"{len(res)} listings fetched" + (f" ({len(src.warnings)} warnings)" if src.warnings else ""),
                            warnings=src.warnings[:6], seconds=round(time.time() - t0, 1), http_status=200, reason=None)
-                log(f"{sid}: {len(res)} listings")
+                log(f"{sid}: {len(res)} listings"); ok_sources += 1
             except http.Blocked as e:
                 set_status(sid, state="blocked", name=sc["name"], type=sc["type"], url=sc.get("url"), last_run=time.time(), count=0,
                            message=e.reason, reason=e.reason, http_status=e.status, seconds=round(time.time() - t0, 1))
@@ -396,11 +397,14 @@ def run_poll(trigger="manual"):
         state.update(finished=time.time())
         db.set_setting("last_poll", {"finished": time.time(), "trigger": trigger})
         log("poll finished")
+        state.pop("restored_at", None)      # the saved results have now been refreshed
         try:
             cache.record_all()
             st = cache.status()
             if st["enabled"]: log(f"cache: {st['entries']} entries, analysis hits {st['hits_analysis']}, misses {st['misses_analysis']}, detail hits {st['hits_detail']}, writes {st['writes']}" + (f", error {st['last_error']}" if st["last_error"] else ""))
         except Exception as e: log(f"cache save failed: {e}")
+        try: snapshot.save(ok_sources)      # only reached after a completed poll: a partial poll never overwrites a good snapshot
+        except Exception as e: log(f"snapshot save failed: {e}")
         return True
     except Exception as e:
         state["last_error"] = f"{type(e).__name__}: {e}"; traceback.print_exc(); log("poll crashed: " + state["last_error"]); return False
