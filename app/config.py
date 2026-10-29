@@ -117,5 +117,5 @@ def default_config():
     from . import private
     cfg = copy.deepcopy(DEFAULT_CONFIG)
     if os.environ.get("PROPDASH_LEAN") == "1":   # small free hosts: fewer photos / detail fetches per cycle
-        cfg["poll"].update(max_photos_per_listing=4, max_detail_fetches_per_cycle=40)
+        cfg["poll"].update(max_photos_per_listing=4, max_detail_fetches_per_cycle=80)
     return private.finalize_config(cfg)
