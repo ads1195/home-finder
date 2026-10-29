@@ -121,12 +121,12 @@ def assess(text, fp, ideal_m2=44.5, photo=None):
             return out("confirmed", _q(a, ideal_m2), a, "floorplan", f"large kitchen-diner (~{a:.0f} m\u00b2) with room for a sofa area")
         if a and a < KD_MIN and f["ok"]:
             return out("absent", 0.0, a, "floorplan", f"kitchen-diner is only ~{a:.0f} m\u00b2 - room for a table but not a sofa area")
-        if a: return out("unconfirmed", 0.3, a, "floorplan", f"kitchen-diner ~{a:.0f} m\u00b2 - check there is room for a sofa area")
-        return out("unconfirmed", 0.3, None, "text", "described as open-plan kitchen/dining - size not known, check there is space for a sofa area")
+        if a: return out("unconfirmed", 0.4, a, "floorplan", f"kitchen-diner ~{a:.0f} m\u00b2 - check there is room for a sofa area")
+        return out("unconfirmed", 0.5, None, "text", "described as open-plan kitchen/dining - size not known, check there is space for a sofa area")
     # 3) kitchen next to a family room / conservatory on the plan, but nothing says it is open
     if f["adj"] and f["has_fam"]:
         a = (f["kit"] or 0) + (f["fam"] or 0) or None
-        return out("unconfirmed", 0.3, a, "floorplan", "kitchen sits next to a family room/conservatory on the plan - check it is open-plan")
+        return out("unconfirmed", 0.35, a, "floorplan", "kitchen sits next to a family room/conservatory on the plan - check it is open-plan")
     # 4) a plan with a kitchen but no open-plan sign: separate kitchen (+ dining) room
     if f["ok"] and f["has_kitchen"]:
         bits = "separate kitchen and dining room" if f["dining"] or tev == "negative" else "separate kitchen"
@@ -135,4 +135,4 @@ def assess(text, fp, ideal_m2=44.5, photo=None):
         return out("absent", 0.0, None, "text", "listing describes a separate kitchen / dining room")
     if photo and photo >= 0.5:
         return out("unconfirmed", 0.4, None, "photos", "no floorplan/clear text; photos look open-plan - check")
-    return out("unconfirmed", 0.25, None, "none", "no floorplan or clear description of the kitchen/living space")
+    return out("unconfirmed", 0.2, None, "none", "no floorplan or clear description of the kitchen/living space")

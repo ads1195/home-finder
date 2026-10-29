@@ -136,7 +136,7 @@ def _counts():
     return out
 
 def _m(n, cap=CAP): return 1 + (cap - 1) * n / (n + K)
-def _mk(kb, n): return _m(n, 3.0) if kb == "w:openplan" else _m(n)      # the core criterion reacts harder to downvotes
+def _mk(kb, n): return _m(n, 2.5) if kb == "w:openplan" else _m(n)      # the core criterion reacts harder to downvotes
 
 def multipliers():
     """{knob: multiplier >= 1}"""

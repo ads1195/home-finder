@@ -237,7 +237,7 @@ def message_for(l, ev, kind):
     d = ev["drive"]
     drv = " · ".join(f'{k.split(" - ")[-1][:22]} {v["drive_min"]:.0f}m' for k, v in d.items())
     return {"title": f'{tag}New match: {l["bedrooms"]} bed, £{l["price"]:,} – {l["address"][:50]}',
-            "body": f'Score {ev["score"]:.0f}/100 · {drv}' + (f' · check: {", ".join(ev["checklist"][k]["label"] for k in ev["unconfirmed_must"])}' if ev["unconfirmed_must"] else ""),
+            "body": f'Score {ev["score"]:.0f}/100 · {drv}' + (f' · check: {", ".join(ev["checklist"][k]["label"] for k in ev["unconfirmed_must"])}' if ev["unconfirmed_must"] else "") + (" · open-plan unconfirmed" if (ev.get("open_plan") or {}).get("state") == "unconfirmed" else ""),
             "kind": kind, "listing_id": l["id"], "price": l["price"], "address": l["address"]}
 
 def curated(cfg=None):
@@ -246,7 +246,7 @@ def curated(cfg=None):
     and its score reaches the configured cutoff; each list is then capped."""
     cfg = cfg or db.config()
     tm = cfg["criteria"].get("top_matches") or {}
-    rows = db.q("""SELECT e.listing_id id, e.score s, e.band b FROM evaluation e JOIN listings l ON l.id=e.listing_id
+    rows = db.q("""SELECT e.listing_id id, e.score s, e.band b, json_extract(e.data, '$.open_plan.state') op FROM evaluation e JOIN listings l ON l.id=e.listing_id
                    WHERE l.active=1 AND l.hidden=0 AND l.down=0 AND e.passes=1 ORDER BY e.score DESC""")
     out = {"matches": [], "just_over": [], "passing": {"matches": 0, "just_over": 0}}
     try: bst = favs.boosts()      # modest 'similar to your saved homes' nudge (passing listings only, capped)
@@ -256,7 +256,9 @@ def curated(cfg=None):
                               ("just_over", "just_over", tm.get("just_over_min_score", 68), tm.get("just_over_max_count", 5))):
         pool = [r for r in rows if r["b"] == band]
         out["passing"][key] = len(pool)
-        ok = [r["id"] for r in pool if (r["s"] or 0) >= (ms or 0)]
+        # open-plan unconfirmed homes are scored down already; they still qualify a little below the cutoff (tagged in the UI), best-first after the confirmed ones
+        um = tm.get("unconfirmed_margin", 10)
+        ok = [r["id"] for r in pool if (r["s"] or 0) >= (ms or 0) - (um if r.get("op") == "unconfirmed" else 0)]
         out[key] = ok[: int(mc)] if mc else ok
     return out
 
