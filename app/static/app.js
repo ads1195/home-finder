@@ -37,10 +37,10 @@ const ICONS = {
 const NAV = [
   {id: "matches", icon: ICONS.matches, label: "Matches", main: 1}, {id: "just_over", icon: ICONS.just_over, label: "Over budget", main: 1},
   {id: "all", icon: ICONS.all, label: "All", main: 1}, {id: "feed", icon: ICONS.feed, label: "Feed", main: 1},
-  {id: "review", icon: ICONS.review, label: "Needs review"}, {id: "saved", icon: ICONS.saved, label: "Saved"}, {id: "notforus", icon: ICONS.notforus, label: "Not for us"},
+  {id: "filtered", icon: ICONS.review, label: "No open-plan"}, {id: "review", icon: ICONS.review, label: "Needs review"}, {id: "saved", icon: ICONS.saved, label: "Saved"}, {id: "notforus", icon: ICONS.notforus, label: "Not for us"},
   {id: "references", icon: ICONS.references, label: "Reference homes"}, {id: "sources", icon: ICONS.sources, label: "Sources"}, {id: "settings", icon: ICONS.settings, label: "Settings"},
 ];
-const TITLES = {matches: "Top matches", just_over: "Just over budget", all: "All fetched", review: "Needs review", saved: "Saved homes", notforus: "Not for us", feed: "Notifications", references: "Reference homes", sources: "Source status", settings: "Settings"};
+const TITLES = {filtered: "Filtered out: no open-plan space", matches: "Top matches", just_over: "Just over budget", all: "All fetched", review: "Needs review", saved: "Saved homes", notforus: "Not for us", feed: "Notifications", references: "Reference homes", sources: "Source status", settings: "Settings"};
 function counts() { return (S && S.counts) || {}; }
 function renderNav(route) {
   const c = counts();
@@ -70,7 +70,7 @@ function parse() {
 async function route() {
   const r = parse();
   if (parse().tab === "favourites") { location.replace("#/saved"); return; }
-  const listTabs = ["matches", "just_over", "all", "review", "saved"];
+  const listTabs = ["matches", "just_over", "filtered", "all", "review", "saved"];
   let view = "list";
   if (r.tab === "listing" || (listTabs.includes(r.tab) && r.id)) view = "detail";
   else if (!listTabs.includes(r.tab)) view = "page";
@@ -101,13 +101,15 @@ async function renderList(tab, selId) {
   try { d = await api(`/listings?tab=${tab}&q=${encodeURIComponent(listState.q)}&sort=${listState.sort}`); }
   catch (e) { lv.innerHTML = `<div class="empty">Could not load listings (${esc(e.message)}).</div>`; return; }
   if (d.counts) { S = S || {}; S.counts = d.counts; renderNav(parse()); }
-  const tabs = [["matches", "Top matches"], ["just_over", "Over budget"], ...(d.counts.show_all ? [["all", "All fetched"], ["review", "Needs review"]] : []), ["saved", "Saved"]];
+  const tabs = [["matches", "Top matches"], ["just_over", "Over budget"], ...(d.counts.filtered ? [["filtered", "No open-plan"]] : []), ...(d.counts.show_all ? [["all", "All fetched"], ["review", "Needs review"]] : []), ["saved", "Saved"]];
   let savedRows = null; if (tab === "saved") { savedRows = await savedItems(); d.items = savedRows; }
   const sortopts = [["score", "Best score"], ["new", "Newest"], ["price", "Price ↑"]];
   const c = d.counts;
   lv.innerHTML = `<div class="tabs">${tabs.map(([id, l]) => `<a href="#/${id}" class="${id === tab ? "on" : ""} ${id === "just_over" ? "over" : ""}">${l}${id === "saved" ? ` <small>(${Fav.count()})</small>` : (c[id] != null ? ` <small>(${c[id]})</small>` : "")}</a>`).join("")}</div>
    <div class="tools"><input id="q" type="search" placeholder="Search address / text" value="${esc(listState.q)}"><select id="sort">${sortopts.map(([v, l]) => `<option value="${v}" ${v === listState.sort ? "selected" : ""}>${l}</option>`).join("")}</select></div>
    ${d.meta ? `<div class="banner">Showing the <b>${d.meta.shown}</b> best of ${d.meta.passing} listings that pass every hard filter (score ≥ ${d.meta.min_score}, max ${d.meta.max_count}). Others stay stored but hidden. <a href="#/settings">Change cut-off</a></div>` : ""}
+   ${tab === "matches" || tab === "just_over" ? `<div class="banner op">🛋️ <b>Core requirement: an open-plan kitchen/dining/living space</b> big enough for a sofa/TV area as well as dining, so you can watch the kids while cooking. It carries the most weight in the score. ${c.openplan_unconfirmed ? `${c.openplan_unconfirmed} homes with an unconfirmed layout are scored down and tagged <b>open-plan unconfirmed</b>. ` : ""}${c.filtered ? `<a href="#/filtered">${c.filtered} otherwise-matching homes</a> were filtered out for having no open-plan space.` : ""}</div>` : ""}
+   ${tab === "filtered" ? '<div class="banner">🚫 <b>Filtered out: no open-plan kitchen/family space</b> — these homes meet the budget, bedrooms and area rules but the plan or description shows a separate kitchen and dining room (or a kitchen-diner with room for a table only). Check the original if you think we got it wrong.</div>' : ""}
    ${tab === "just_over" ? '<div class="banner">💷 <b>Just over budget</b> — strong matches priced above your normal ceiling (within the stretch limit). All other hard criteria are met.</div>' : ""}
    ${tab === "review" ? '<div class="banner">These listings fail nothing explicitly but some hard data (price, bedrooms, location/drive time) is still unknown. Check the original.</div>' : ""}
    <div class="cards">${(savedRows ? savedRows.map(savedCardHtml) : d.items.map(c => cardHtml(c))).join("") || `<div class="empty" style="grid-column:1/-1">${MODE.offline ? "Nothing cached yet." : (tab === "saved" ? "Nothing saved yet. Tap the ♥ on any home to keep it here." : "No listings in this view yet. Run a poll (⟳) or relax criteria in Settings.")}</div>`}</div>`;
@@ -119,7 +121,9 @@ const IC = {confirmed: "✓", contradicted: "✗", not_mentioned: "?"};
 function cardHtml(c, o = {}) {
   const drv = Object.entries(c.drive_full || {}).map(([k, v]) => `${esc(k.split(" - ")[0])} ${v.min}m${v.est ? "*" : ""}`).join(" · ");
   const bg = c.image ? `style="background-image:url('${esc(c.image)}')"` : "";
-  const tag = c.is_new ? '<span class="pill new">New</span>' : c.band === "just_over" ? '<span class="pill over">Over budget</span>' : "";
+  const opn = c.openplan;
+  const opTag = !opn ? "" : opn.state === "confirmed" ? `<span class="pill ok">🛋️ Open-plan${opn.area ? " ~" + Math.round(opn.area) + " m²" : ""}</span>` : opn.state === "unconfirmed" ? '<span class="pill warn">🛋️ Open-plan unconfirmed</span>' : '<span class="pill bad">No open-plan</span>';
+  const tag = (c.is_new ? '<span class="pill new">New</span>' : c.band === "just_over" ? '<span class="pill over">Over budget</span>' : "") + opTag;
   const facts = [`${c.bedrooms ?? "?"} bed`, c.property_type ? esc(c.property_type) : ""].filter(Boolean).join(' <span class="dot2">·</span> ');
   return `<article class="card" data-id="${c.id}" data-key="${esc(Fav.key(c))}"><div class="ph" ${bg}><div class="tags">${tag}</div>${heartHtml(c)}${shareHtml(c)}${downHtml(c)}${c.score != null ? `<span class="scorebub score">${Math.round(c.score)}</span>` : ""}</div>
   <div class="body"><div><span class="price">${gbp(c.price)}</span> <span class="scoreinline scorebub">${c.score != null ? Math.round(c.score) : ""}</span></div>
@@ -168,6 +172,7 @@ async function renderDetail(id) {
      ${d.card && d.card.fav_boost >= 0.5 ? `<p class="hint">♥ Ranked slightly higher because it resembles homes you saved (+${d.card.fav_boost}).</p>` : ""}<p class="hint">First seen ${fdt(l.first_seen)} (Europe/London) · listed on ${d.sightings.length} source(s): ${d.sightings.map(s => esc(s.source)).join(", ")}</p>
    </div>
    <div class="twocol">
+   ${ev && ev.open_plan ? sec("🛋️ Open-plan kitchen / dining / living space (core requirement)", openPlanHtml(ev.open_plan), true, "openplan") : ""}
    ${ev && ev.vs_ideal ? sec("vs your ideal home", idealHtml(ev.vs_ideal), true, "ideal") : ""}
    ${ev ? sec("Your checklist", checklistHtml(ev), true, "checklist") : ""}
    ${ev ? sec("vs your current home", vsHtml(ev, d.current_home, an), true, "vs") : ""}
@@ -194,6 +199,14 @@ async function renderDetail(id) {
   $("#reanalyse").onclick = async e => { e.target.textContent = "Analysing…"; await api(`/listings/${id}/reanalyse`, {method: "POST"}); renderDetail(id); };
   mapInit(l, d.anchors);
   dv.scrollTop = 0; $("#detailpane").scrollTop = 0;
+}
+function openPlanHtml(o) {
+  const st = {confirmed: ['ok', "Confirmed open-plan"], unconfirmed: ['warn', "Open-plan unconfirmed"], absent: ['bad', "No open-plan space"]}[o.state] || ['', o.state];
+  const basis = {floorplan: "floor plan", text: "listing description", photos: "photos", none: "no evidence"}[o.basis] || o.basis;
+  const next = o.state === "unconfirmed" ? "<p class='hint'>Scored down until you can confirm it: check the floor plan or photos for a kitchen that opens onto a dining + sofa area (ideal ~45 m²).</p>"
+    : o.state === "absent" ? "<p class='hint'>Excluded from matches: a separate kitchen and dining room, or only room for a table.</p>" : "";
+  return `<p><span class="pill ${st[0]}">${st[1]}</span> ${o.area_m2 ? `<span class="pill">~${Math.round(o.area_m2)} m² · ${esc(o.size || "")}</span>` : ""} <span class="hint">based on ${esc(basis)}</span></p>
+   <p>${esc(o.why || "")}</p>${o.quote && o.basis === "text" ? `<div class="ev">“${esc(o.quote)}”</div>` : ""}${next}`;
 }
 function checklistHtml(ev) {
   const ic = {confirmed: "✅", contradicted: "❌", not_mentioned: "❔"};

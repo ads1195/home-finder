@@ -69,6 +69,7 @@ DEFAULT_CONFIG = {
         "score_weights": {
             "drive": 30,          # max pts for drive times (anchors weighted via anchor weight)
             "checklist": 35,      # scaled from checklist weights
+            "openplan": 60,       # open-plan kitchen/dining/family space: the dominant factor (confirmed + large = full marks)
             "workspace": 10,
             "similarity": 15,     # similarity to reference homes (if any uploaded)
             "layout": 5,          # floorplan area / room-count signals

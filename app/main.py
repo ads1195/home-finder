@@ -101,6 +101,16 @@ def local_media(l, an):
     an = an or {}
     return pick(an.get("photo_files", []), an.get("photo_urls")), pick(an.get("floorplan_files", []), an.get("floorplan_urls"))
 
+def _op_card(ev):
+    o = (ev or {}).get("open_plan")
+    if not o: return None
+    return {"state": o["state"], "area": o.get("area_m2"), "size": o.get("size"), "why": o.get("why"), "basis": o.get("basis")}
+
+def _filtered_openplan(ev):
+    """homes that would otherwise be matches (in or just over budget, every other hard filter met) but have no open-plan kitchen/family space"""
+    return bool(ev and "no open-plan" in (ev.get("excluded") or []) and ev.get("band") in ("in_budget", "just_over")
+                and all(h["ok"] or h["key"] == "open-plan" for h in ev["hard"]))
+
 def card(l, ev, an, srcs, url=None, boost=0):
     ph, _ = local_media(l, an)
     img = (ph[0] if ph else (l["images"][0] if l["images"] else None))
@@ -116,7 +126,7 @@ def card(l, ev, an, srcs, url=None, boost=0):
             "checklist": {k: {"state": v["state"], "label": v["label"], "mode": v["mode"]} for k, v in ck.items()},
             "unconfirmed_must": ev["unconfirmed_must"] if ev else [], "station": ev["station"] if ev else None,
             "similarity": (ev.get("similarity") or {}).get("score") if ev else None,
-            "is_new": (time.time() - l["first_seen"]) < 48 * 3600}
+            "openplan": _op_card(ev), "is_new": (time.time() - l["first_seen"]) < 48 * 3600}
 
 @app.get("/api/listings")
 def listings(tab: str = "matches", q: str = "", sort: str = "score", hidden: int = 0):
@@ -134,6 +144,7 @@ def listings(tab: str = "matches", q: str = "", sort: str = "score", hidden: int
         an = json.loads(r["an"]) if r["an"] else None
         if tab in top and l["id"] not in top[tab]: continue
         if tab == "favourites" and not l["favourite"]: continue
+        if tab == "filtered" and not _filtered_openplan(ev): continue
         if tab == "review" and not (ev and not ev["passes"] and ev["unknown_hard"] and not ev.get("excluded")): continue
         if q and q.lower() not in (l["address"] + " " + l["title"] + " " + (l["description"] or "")).lower(): continue
         sg = db.q("SELECT source,url FROM sightings WHERE listing_id=?", (l["id"],))
@@ -153,7 +164,9 @@ def counts_summary():
     r = db.q("SELECT e.passes p, e.band b, e.data d FROM listings l JOIN evaluation e ON e.listing_id=l.id WHERE l.active=1 AND l.hidden=0 AND l.down=0")
     cur = engine.curated()
     m, j = len(cur["matches"]), len(cur["just_over"])
-    return {"matches": m, "just_over": j, "show_all": bool(db.config().get("ui", {}).get("show_all_fetched")),
+    evs = [json.loads(x["d"]) for x in r]
+    unconf = sum(1 for e in evs if _filtered_openplan(e) is False and e.get("passes") and (e.get("open_plan") or {}).get("state") == "unconfirmed")
+    return {"matches": m, "just_over": j, "filtered": sum(1 for e in evs if _filtered_openplan(e)), "openplan_unconfirmed": unconf, "show_all": bool(db.config().get("ui", {}).get("show_all_fetched")),
             "passing_hidden": (cur["passing"]["matches"] - m) + (cur["passing"]["just_over"] - j), "all": len(r), "unread": db.q1("SELECT COUNT(*) c FROM notifications WHERE read=0")["c"],
             "review": sum(1 for x in r if (not x["p"]) and (lambda d: d.get("unknown_hard") and not d.get("excluded"))(json.loads(x["d"]))),
             "favourites": db.q1("SELECT COUNT(*) c FROM listings WHERE favourite=1 AND active=1")["c"]}

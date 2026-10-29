@@ -33,7 +33,7 @@ REASONS = [
 LABEL = dict(REASONS)
 # reason -> scoring knobs ("ck:" checklist weight, "ideal:" row weight in the ideal-home fit, "w:" score_weights, "adj:" additive adjustment)
 KNOBS = {
-    "openplan": ["ck:kitchen_family", "ideal:kitchen_family"],
+    "openplan": ["ck:kitchen_family", "ideal:kitchen_family", "w:openplan"],
     "lounge": ["ideal:lounge", "ideal:lounge_area"],
     "kitchen_small": ["ideal:kitchen_area"],
     "layout": ["w:ideal"],
@@ -56,7 +56,7 @@ KNOB_NAME = {
     "ideal:bedrooms": "Bedrooms (ideal fit)", "ideal:bed_sizes": "Bedroom sizes (ideal fit)", "w:size": "Floor-area score",
     "ck:garden_size": "Garden (checklist)", "ideal:garden": "Garden (ideal fit)", "ck:not_overlooked": "Not overlooked (checklist)",
     "ck:parking": "Parking (checklist)", "ideal:parking": "Parking (ideal fit)", "adj:condition": "Condition penalty (max)",
-    "adj:crime": "Crime penalty (max)", "w:drive": "Drive-time score", "w:price": "Price-band score",
+    "adj:crime": "Crime penalty (max)", "w:drive": "Drive-time score", "w:price": "Price-band score", "w:openplan": "Open-plan family space score",
 }
 IDEAL_W = {"kitchen_family": 4, "kitchen_area": 3, "lounge": 3, "lounge_area": 1.5, "utility": 3, "wc": 2.5, "ensuite": 2.5, "bedrooms": 2,
            "bed_sizes": 2, "parking": 1.5, "garden": 2}
@@ -135,7 +135,8 @@ def _counts():
         for r in set(e["reasons"]): out[r] = out.get(r, 0) + 1
     return out
 
-def _m(n): return 1 + (CAP - 1) * n / (n + K)
+def _m(n, cap=CAP): return 1 + (cap - 1) * n / (n + K)
+def _mk(kb, n): return _m(n, 3.0) if kb == "w:openplan" else _m(n)      # the core criterion reacts harder to downvotes
 
 def multipliers():
     """{knob: multiplier >= 1}"""
@@ -144,7 +145,7 @@ def multipliers():
     with _lock:
         v = {}
         for r, n in _counts().items():
-            for kb in KNOBS.get(r, []): v[kb] = max(v.get(kb, 1.0), _m(n))
+            for kb in KNOBS.get(r, []): v[kb] = max(v.get(kb, 1.0), _mk(kb, n))
         _mult["key"], _mult["v"] = key, v
     return v
 
@@ -157,7 +158,7 @@ def learned(cfg=None):
             kind, name = kb.split(":")
             base = ckw.get(name) if kind == "ck" else IDEAL_W.get(name) if kind == "ideal" else sw.get(name) if kind == "w" else ADJ_MAX.get(name)
             if base is None: continue
-            eff.append({"name": KNOB_NAME.get(kb, kb), "default": base, "now": round(base * m, 2)})
+            eff.append({"name": KNOB_NAME.get(kb, kb), "default": base, "now": round(base * (_mk(kb, n) if n else 1.0), 2)})
         extra = {"area": "+ small penalty for homes within ~300 m / on the same street", "noise": "small penalty for homes on the same street",
                  "style": "mild penalty for homes whose photos look similar", "other": "recorded only"}.get(r)
         rows.append({"id": r, "label": label, "count": n, "mult": round(m, 2), "effects": eff, "extra": extra})
@@ -237,7 +238,7 @@ def suspects(ev):
     out = []
     rows = {r["key"]: r for r in (ev.get("vs_ideal") or {}).get("rows", [])}
     def short(*ks): return any((rows.get(k) or {}).get("status") == "short" for k in ks)
-    if short("kitchen_family"): out.append("openplan")
+    if short("kitchen_family") or (ev.get("open_plan") or {}).get("state") in ("absent", "unconfirmed"): out.append("openplan")
     if short("lounge"): out.append("lounge")
     if short("kitchen_area"): out.append("kitchen_small")
     if short("utility"): out.append("utility")

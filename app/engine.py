@@ -426,7 +426,7 @@ def ensure_anchor_coords(cfg):
 
 def filter_counts():
     """counts of active listings removed / flagged by the area, condition and crime filters (no personal detail)"""
-    out = {"avoided_area": 0, "needs_work": 0, "crime_review": 0, "crime_high": 0, "crime_low": 0, "condition_penalised": 0, "condition_boosted": 0, "avoided_by": {}}
+    out = {"avoided_area": 0, "needs_work": 0, "crime_review": 0, "crime_high": 0, "crime_low": 0, "condition_penalised": 0, "condition_boosted": 0, "no_open_plan": 0, "open_plan_unconfirmed": 0, "avoided_by": {}}
     for r in db.q("SELECT e.data d FROM listings l JOIN evaluation e ON e.listing_id=l.id WHERE l.active=1"):
         ev = json.loads(r["d"]); ex = ev.get("excluded") or []
         if "avoided area" in ex:
@@ -434,6 +434,8 @@ def filter_counts():
             for h in ev["hard"]:
                 if h["key"] == "avoided area": out["avoided_by"][h["detail"]] = out["avoided_by"].get(h["detail"], 0) + 1
         if "needs work" in ex: out["needs_work"] += 1
+        if "no open-plan" in ex: out["no_open_plan"] += 1
+        elif (ev.get("open_plan") or {}).get("state") == "unconfirmed": out["open_plan_unconfirmed"] += 1
         cr = ev.get("crime")
         if cr: out["crime_" + cr["level"]] = out.get("crime_" + cr["level"], 0) + 1
         a = (ev.get("adjust") or {}).get("condition", 0)

@@ -3,6 +3,7 @@ import re
 from .geo import haversine_km
 from . import votes as _votes, avoid as _avoid, condition as _cond
 from .private import ideal_home as _ideal_home
+from . import openplan as _openplan
 from .private import current_home_default as _chd; CURRENT_HOME_DEFAULT = _chd()
 
 
@@ -88,8 +89,19 @@ def evaluate(l, routes, analysis, cfg, refs_sim=None, current_home=None):
         H(f"anchor:{a['name']}", ok_s and ok_d, f"{r['straight_km']:.1f} km straight, {r['drive_min']:.0f} min drive{est} (max {a['max_drive_min']} min)")
     # checklist (tri-state)
     ck = merge_checklist(analysis, cfg)
+    # the core requirement: a proper open-plan kitchen/dining/living (family) space, big enough for a sofa area as well as dining
+    op = _openplan.assess(text, (analysis or {}).get("floorplan"), (_ideal_home() or {}).get("open_plan_m2", 44.5), l.get("_photo_open"))
+    kf = ck.get("kitchen_family")
+    if kf is not None:
+        kf.update(state={"confirmed": "confirmed", "absent": "contradicted"}.get(op["state"], "not_mentioned"), source="open-plan check",
+                  evidence=op["why"] + (f" ({op['quote']})" if op.get("quote") and op["basis"] == "text" else ""))
+        kf["likely_absent_on_floorplan"] = False
+        if op["state"] == "unconfirmed": kf["note"] = "open-plan unconfirmed"
+    if op["state"] == "absent":
+        H("open-plan", False, "No open-plan kitchen/family space \u2014 " + op["why"]); excluded.append("no open-plan")
     contradicted, unknown = [], []
     for k, item in ck.items():
+        if k == "kitchen_family" and op["state"] == "absent": continue      # already reported by the open-plan filter
         if item["mode"] == "must":
             if item["state"] == "contradicted": contradicted.append(k)
             elif item["state"] == "not_mentioned": unknown.append(k)
@@ -146,7 +158,7 @@ def evaluate(l, routes, analysis, cfg, refs_sim=None, current_home=None):
     sw = w.get("size", 14)
     if sq and sw:
         parts["size"] = size_curve(sq, ideal) * sw; tot_w += sw
-    vi = vs_ideal(l, text, ck, fp, fl, sq, b, ideal, analysis, c, lw)
+    vi = vs_ideal(l, text, ck, fp, fl, sq, b, ideal, analysis, c, lw, op)
     iw = w.get("ideal", 35)
     if iw: parts["ideal"] = vi["fit_learned"] * iw; tot_w += iw
     bw = w.get("beyond", 3)
@@ -156,10 +168,13 @@ def evaluate(l, routes, analysis, cfg, refs_sim=None, current_home=None):
         parts["station"] = max(0.0, 1 - st_["km"] / 5.0) * w["station"]
     tot_w += w["station"]
     parts["price"] = (1.0 if band == "in_budget" else 0.3 if band == "just_over" else 0) * w["price"]; tot_w += w["price"]
+    ow = w.get("openplan", 60)          # the dominant factor: open-plan family space (confirmed + big = full marks, unconfirmed ~ a quarter, absent = 0 and excluded)
+    parts["openplan"] = op["q"] * ow; tot_w += ow
     lpen = 0.0
-    for _k in ("drive", "ideal", "size", "price"):
+    for _k in ("drive", "ideal", "size", "price", "openplan"):
         _m = lw.get("w:" + _k)
-        if _m and parts.get(_k) is not None and w.get(_k): lpen += (_m - 1) * w[_k] * (1 - min(1.0, max(0.0, parts[_k] / w[_k])))
+        _wk = w.get(_k, ow if _k == "openplan" else 0)
+        if _m and parts.get(_k) is not None and _wk: lpen += (_m - 1) * _wk * (1 - min(1.0, max(0.0, parts[_k] / _wk)))
     if lpen > 0.001: parts["learned"] = -round(lpen, 3)
     score = round(sum(parts.values()) / tot_w * 100, 1) if tot_w else 0
     # small additive adjustments: crime (-8..+2) and condition (-6..+3)
@@ -191,7 +206,7 @@ def evaluate(l, routes, analysis, cfg, refs_sim=None, current_home=None):
             "checklist": ck, "contradicted_must": contradicted, "unconfirmed_must": unknown,
             "score": score, "score_parts": {k: round(v, 2) for k, v in parts.items()}, "workspace_hits": hits,
             "drive": drive, "station": st_, "vs_current": vs, "vs_ideal": vi, "similarity": refs_sim,
-            "excluded": excluded, "crime": cr, "condition": condition, "adjust": adjust, "feedback": (fb or None)}
+            "excluded": excluded, "open_plan": op, "crime": cr, "condition": condition, "adjust": adjust, "feedback": (fb or None)}
 
 def merge_checklist(analysis, cfg):
     """Combine text / floorplan / vision evidence into the tri-state checklist."""
@@ -243,7 +258,7 @@ _RX = {
     "detached": r"\bdetached\b",
 }
 
-def vs_ideal(l, text, ck, fp, fl, sq, b, ideal, analysis, c, lw=None):
+def vs_ideal(l, text, ck, fp, fl, sq, b, ideal, analysis, c, lw=None, op=None):
     """Compare a listing with the benchmark.  status: beats | meets | short | unknown (+ points 0..1 used for the fit)."""
     low = (text + " " + (analysis or {}).get("floorplan_text", "")).lower()
     fp_ok = bool(fp.get("usable")) and fp.get("n_labels", 0) >= 6
@@ -277,6 +292,7 @@ def vs_ideal(l, text, ck, fp, fl, sq, b, ideal, analysis, c, lw=None):
     kit = [r["area_m2"] for r in frooms if r["type"] in ("kitchen", "kitchen_diner") and gfl(r)]
     fam = [r["area_m2"] for r in frooms if r["type"] in ("family", "conservatory") and gfl(r)]
     ka = max(comb + ([max(kit) + max(fam)] if kit and fam and fl.get("kitchen_family") else []), default=0)
+    if op and op.get("state") == "confirmed" and op.get("area_m2"): ka = max(ka, op["area_m2"])
     if ka:
         ratio = ka / want_k
         row("kitchen_area", "Open-plan kitchen/dining/family size", f"~{want_k:.0f} m\u00b2", f"~{ka:.0f} m\u00b2", "beats" if ratio >= 1.12 else "meets" if ratio >= 0.9 else "short", 3, min(1.0, ratio ** 1.5))
