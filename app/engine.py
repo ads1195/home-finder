@@ -2,7 +2,7 @@
 import os, json, re, threading, time, traceback
 from pathlib import Path
 import numpy as np
-from . import db, geo, http, textanalysis, layout, embed, vision, refs, notify, stations, push, favs, cache
+from . import db, geo, http, textanalysis, layout, embed, vision, refs, notify, stations, push, favs, cache, avoid, crime, condition
 from .config import DATA
 from .engine_io import fetch_file
 from .matcher import evaluate, listing_text
@@ -100,6 +100,7 @@ def is_candidate(l, cfg):
     if l.get("bedrooms") and l["bedrooms"] < c["bedrooms_min"]: return False
     st = (l.get("status_text") or "").lower()
     if re.search(r"sold|stc|under offer|sale agreed", st): return False
+    if avoid.check(l, c.get("avoid_areas")): return False      # private list of areas to avoid: don't spend calls on them
     ok = True
     t = ((l.get("property_type") or "") + " " + (l.get("title") or "")).lower()
     if any(b in t for b in c.get("exclude_property_types", [])): return False
@@ -215,6 +216,11 @@ def evaluate_listing(lid, cfg, refset=None, analyse=True):
     if l.get("lat") is not None:
         l["_station"] = stations.nearest(l["lat"], l["lon"])
     ck_for_sim = None
+    if l.get("lat") is not None:        # cached crime context only (lookups happen in the poll, for homes that pass the hard filters)
+        try: l["_crime"] = crime.rate(crime.lookup(l["lat"], l["lon"], fetch_missing=False))
+        except Exception: pass
+    try: l["_photo_cond"] = condition.photo_condition(listing_embs(lid))
+    except Exception: pass
     ev = evaluate(l, get_routes(lid), an, cfg, None, refs.current_home())
     sim = None
     if refset is not None:
@@ -353,7 +359,7 @@ def run_poll(trigger="manual"):
         refset = refs.reference_set()
         if not refset[0] and not refset[1]: refset = None
         ids = [r["id"] for r in db.q("SELECT id FROM listings WHERE active=1")]
-        n_cand = 0
+        n_cand = 0; crime_ids = []
         for lid in ids:
             l = get_listing(lid)
             try:
@@ -362,9 +368,10 @@ def run_poll(trigger="manual"):
                     l = get_listing(lid)
                 if is_candidate(l, cfg):
                     pre = evaluate_listing(lid, cfg, None)
-                    hard_ok = all(h["ok"] for h in pre["hard"] if h["key"] not in ("must_haves",))
+                    hard_ok = all(h["ok"] for h in pre["hard"] if h["key"] not in ("must_haves", "crime"))
                     if hard_ok:
                         n_cand += 1
+                        if l.get("lat") is not None and crime.lookup(l["lat"], l["lon"]): crime_ids.append(lid)
                         analyse_listing(lid, cfg)
                         _release_memory()
                 evaluate_listing(lid, cfg, refset)
@@ -372,6 +379,12 @@ def run_poll(trigger="manual"):
                 log(f"evaluate {lid} failed: {type(e).__name__}: {e}")
                 traceback.print_exc()
         log(f"analysed {n_cand} candidates in depth")
+        try:      # the typical-crime baseline moved while we fetched: score the homes that have crime data again
+            for lid in crime_ids: evaluate_listing(lid, cfg, refset)
+            log(f"crime: {crime.stats['fetched']} places fetched, {crime.stats['cached']} from cache, {crime.stats['failed']} failed, {crime.stats['calls']} API calls")
+        except Exception as e: log(f"crime re-score failed: {e}")
+        try: state["filters"] = filter_counts()
+        except Exception as e: log(f"filter counts failed: {e}")
         notify_curated(cfg, baseline)
         cur = curated(cfg)
         log(f"top matches: {len(cur['matches'])} (of {cur['passing']['matches']} passing) · just over budget: {len(cur['just_over'])} (of {cur['passing']['just_over']} passing)")
@@ -402,6 +415,23 @@ def ensure_anchor_coords(cfg):
             g = geo.geocode_any(a["address"])
             if g: a["lat"], a["lon"] = g["lat"], g["lon"]; changed = True
     if changed: db.set_setting("config", cfg)
+
+def filter_counts():
+    """counts of active listings removed / flagged by the area, condition and crime filters (no personal detail)"""
+    out = {"avoided_area": 0, "needs_work": 0, "crime_review": 0, "crime_high": 0, "crime_low": 0, "condition_penalised": 0, "condition_boosted": 0, "avoided_by": {}}
+    for r in db.q("SELECT e.data d FROM listings l JOIN evaluation e ON e.listing_id=l.id WHERE l.active=1"):
+        ev = json.loads(r["d"]); ex = ev.get("excluded") or []
+        if "avoided area" in ex:
+            out["avoided_area"] += 1
+            for h in ev["hard"]:
+                if h["key"] == "avoided area": out["avoided_by"][h["detail"]] = out["avoided_by"].get(h["detail"], 0) + 1
+        if "needs work" in ex: out["needs_work"] += 1
+        cr = ev.get("crime")
+        if cr: out["crime_" + cr["level"]] = out.get("crime_" + cr["level"], 0) + 1
+        a = (ev.get("adjust") or {}).get("condition", 0)
+        if a < 0: out["condition_penalised"] += 1
+        elif a > 0: out["condition_boosted"] += 1
+    return out
 
 def re_evaluate_all():
     cfg = db.config(); refset = refs.reference_set()

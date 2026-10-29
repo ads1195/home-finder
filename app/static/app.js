@@ -159,6 +159,7 @@ async function renderDetail(id) {
      <div class="addr" style="font-size:1rem">${esc(l.address)}</div>
      <div class="meta" style="margin-top:6px"><span>🛏 ${l.bedrooms ?? "?"} bed</span><span>🛁 ${l.bathrooms ?? "?"} bath</span><span>${esc(l.property_type || "")}</span><span>${esc(l.tenure || "")}</span><span>${esc(l.agent || "")}</span></div>
      <div class="meta" style="margin-top:6px;gap:6px">${drv.map(([k, v]) => `<span class="pill ${v.drive_min <= (d.anchors.find(a => a.name === k) || {max_drive_min: 25}).max_drive_min ? "ok" : "bad"}">🚗 ${esc(k.split(" - ")[1] ? k.split(" - ")[1].replace(/ \(PRIMARY\)/, "") : k)}: ${Math.round(v.drive_min)} min · ${v.straight_km.toFixed(1)} km${v.method === "estimate" ? " (est.)" : ""}</span>`).join("") || '<span class="hint">drive times pending</span>'}</div>
+     ${ev ? areaInfoHtml(ev) : ""}
      ${ev && ev.reasons.length ? `<div class="banner" style="margin-top:8px"><b>Why not a match:</b><ul class="plain">${ev.reasons.map(r => `<li>${esc(r)}</li>`).join("")}</ul></div>` : ""}
      <div class="btnrow">${d.sightings.map(s => `<a class="btn pri" href="${esc(s.url)}" target="_blank" rel="noopener">Open on ${esc(s.source)} ↗</a>`).join("")}
        <button class="btn savebtn ${Fav.has(d.card) ? "on" : ""}" id="fav" data-heart="${esc(Fav.key(d.card))}"><span class="hi">${HEART}</span><span class="lbl">${Fav.has(d.card) ? "Saved" : "Save"}</span></button><button class="btn sharedetail" id="shr" data-share="${esc(Fav.key(d.card))}" data-url="${esc((d.sightings[0] || {}).url || "")}"><span class="hi">${SHARE_ICON}</span><span class="lbl">Share</span></button><button class="btn danger" id="hide">${l.hidden ? "Unhide" : "Hide"}</button></div>
@@ -232,6 +233,21 @@ function layoutHtml(an, ev) {
   else out.push(`<p class="hint">Vision model: ${esc((v && (v.reason || v.error)) || "off")}</p>`);
   return out.join("");
 }
+function areaInfoHtml(ev) {
+  const rows = [], cd = ev.condition, cr = ev.crime;
+  if (cd) {
+    const ic = {needs_work: "🛠", some_updating: "🔧", ready: "✨", unknown: "🏠"}[cd.state] || "🏠";
+    const why = cd.state === "needs_work" ? (cd.bad || []).join(", ") : cd.state === "some_updating" ? [...(cd.mild || []), ...(cd.photo && cd.photo.dated >= 0.55 ? ["photos show a dated kitchen/bathroom"] : [])].join(", ") : cd.state === "ready" ? (cd.good || []).join(", ") : "";
+    rows.push(`<li>${ic} <b>Condition:</b> ${esc(cd.label)}${why ? ` <span class="hint">(${esc(why)})</span>` : ""}</li>`);
+  }
+  if (cr) {
+    const word = {low: "low", average: "average", high: "high", review: "very high"}[cr.level] || cr.level;
+    const extra = ` · ${cr.v.toFixed(0)} violent, ${cr.b.toFixed(1)} burglary / month`;
+    rows.push(`<li>🚔 <b>Crime:</b> ${word} for the area <span class="hint">(${cr.n.toFixed(0)} incidents/month within ~500 m${extra}; last ${cr.months} months)</span>${cr.url ? ` <a href="${esc(cr.url)}" target="_blank" rel="noopener">police.uk ↗</a>` : ""}</li>`);
+  }
+  return rows.length ? `<ul class="plain" style="margin:8px 0 0">${rows.join("")}</ul>` : "";
+}
+
 function hardHtml(ev) {
   return `<ul class="plain hard">${ev.hard.map(h => `<li class="${h.status === "pass" ? "p" : h.status === "unknown" ? "u" : "f"}">${h.status === "pass" ? "✓" : h.status === "unknown" ? "?" : "✗"} <b>${esc(h.key.replace("anchor:", "drive: "))}</b> — ${esc(h.detail)}</li>`).join("")}</ul>
   <p><b>Score parts</b> (weighted): ${Object.entries(ev.score_parts).map(([k, v]) => `${k} ${v}`).join(" · ")}</p>${ev.workspace_hits.length ? `<p>Workspace signals: ${ev.workspace_hits.map(esc).join(", ")}</p>` : ""}`;

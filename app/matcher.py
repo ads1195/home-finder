@@ -1,6 +1,7 @@
 """Hard filters + tri-state checklist + scoring.  Pure functions (no I/O) so they are easy to test."""
 import re
 from .geo import haversine_km
+from . import avoid as _avoid, condition as _cond
 from .private import ideal_home as _ideal_home
 from .private import current_home_default as _chd; CURRENT_HOME_DEFAULT = _chd()
 
@@ -63,6 +64,17 @@ def evaluate(l, routes, analysis, cfg, refs_sim=None, current_home=None):
     if sa and l.get("lat") is not None:
         d = haversine_km(l["lat"], l["lon"], sa["lat"], sa["lon"]) / 1.609344
         H("search_area", d <= sa["radius_miles"], f"{d:.1f} mi from area centre (max {sa['radius_miles']})")
+    # areas to avoid (private list from the config), 'needs work' (listing text) and crime context
+    excluded = []
+    av = _avoid.check(l, c.get("avoid_areas"))
+    if av: H("avoided area", False, av); excluded.append("avoided area")
+    cond = _cond.text_condition(text)
+    if cond["bad"]:
+        H("needs work", False, ", ".join(cond["bad"]) + (f" (\u201c{cond['quote']}\u201d)" if cond.get("quote") else "")); excluded.append("needs work")
+    cr = l.get("_crime")
+    if cr and cr["level"] == "review":
+        H("crime", False, f"very high for the area ({cr['n']:.0f} incidents/month within ~500 m, {cr['ratio']:.1f}x the typical level) - review", "unknown")
+    ph = l.get("_photo_cond")
     # anchors
     drive = {}
     for a in c.get("anchors", []):
@@ -141,6 +153,20 @@ def evaluate(l, routes, analysis, cfg, refs_sim=None, current_home=None):
     tot_w += w["station"]
     parts["price"] = (1.0 if band == "in_budget" else 0.3 if band == "just_over" else 0) * w["price"]; tot_w += w["price"]
     score = round(sum(parts.values()) / tot_w * 100, 1) if tot_w else 0
+    # small additive adjustments: crime (-8..+2) and condition (-6..+3)
+    adjust = {}
+    if cr: adjust["crime"] = cr["adj"]
+    ca = 0.0
+    if cond["mild"]: ca -= 3.0
+    if cond["good"] and not cond["bad"]: ca += 2.0
+    if ph and ph["dated"] >= 0.45: ca -= min(4.0, (ph["dated"] - 0.35) / 0.3 * 4.0)
+    elif ph and ph["n"] >= 2 and ph["dated"] <= 0.12: ca += 1.0
+    if ca: adjust["condition"] = round(max(-6.0, min(3.0, ca)), 1)
+    if adjust: score = round(max(0.0, min(100.0, score + sum(adjust.values()))), 1)
+    photo_dated = bool(ph and ph["dated"] >= 0.55)
+    cstate = "needs_work" if cond["bad"] else "some_updating" if (cond["mild"] and not cond["good"]) or photo_dated else "ready" if cond["good"] else "unknown"
+    condition = {"state": cstate, "label": {"needs_work": "needs work", "some_updating": "some updating", "ready": "move-in ready", "unknown": "no concerns flagged"}[cstate],
+                 "bad": cond["bad"], "mild": cond["mild"], "good": cond["good"], "quote": cond.get("quote"), "photo": ph}
     # vs current home
     ch = current_home or CURRENT_HOME_DEFAULT
     vs = {"bedrooms": (b, ch.get("bedrooms")), "bathrooms": (l.get("bathrooms"), ch.get("bathrooms")),
@@ -152,7 +178,8 @@ def evaluate(l, routes, analysis, cfg, refs_sim=None, current_home=None):
     return {"hard": hard, "passes": passes, "band": band, "reasons": reasons, "unknown_hard": unknown_hard,
             "checklist": ck, "contradicted_must": contradicted, "unconfirmed_must": unknown,
             "score": score, "score_parts": {k: round(v, 2) for k, v in parts.items()}, "workspace_hits": hits,
-            "drive": drive, "station": st_, "vs_current": vs, "vs_ideal": vi, "similarity": refs_sim}
+            "drive": drive, "station": st_, "vs_current": vs, "vs_ideal": vi, "similarity": refs_sim,
+            "excluded": excluded, "crime": cr, "condition": condition, "adjust": adjust}
 
 def merge_checklist(analysis, cfg):
     """Combine text / floorplan / vision evidence into the tri-state checklist."""

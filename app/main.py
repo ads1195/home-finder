@@ -127,7 +127,7 @@ def listings(tab: str = "matches", q: str = "", sort: str = "score", hidden: int
         an = json.loads(r["an"]) if r["an"] else None
         if tab in top and l["id"] not in top[tab]: continue
         if tab == "favourites" and not l["favourite"]: continue
-        if tab == "review" and not (ev and not ev["passes"] and ev["unknown_hard"]): continue
+        if tab == "review" and not (ev and not ev["passes"] and ev["unknown_hard"] and not ev.get("excluded")): continue
         if q and q.lower() not in (l["address"] + " " + l["title"] + " " + (l["description"] or "")).lower(): continue
         sg = db.q("SELECT source,url FROM sightings WHERE listing_id=?", (l["id"],))
         out.append(card(l, ev, an, [x["source"] for x in sg], favs.norm_url(sg[0]["url"]) if sg else None, bst.get(l["id"], 0) if (ev and ev["passes"]) else 0))
@@ -148,7 +148,7 @@ def counts_summary():
     m, j = len(cur["matches"]), len(cur["just_over"])
     return {"matches": m, "just_over": j, "show_all": bool(db.config().get("ui", {}).get("show_all_fetched")),
             "passing_hidden": (cur["passing"]["matches"] - m) + (cur["passing"]["just_over"] - j), "all": len(r), "unread": db.q1("SELECT COUNT(*) c FROM notifications WHERE read=0")["c"],
-            "review": sum(1 for x in r if (not x["p"]) and json.loads(x["d"]).get("unknown_hard")),
+            "review": sum(1 for x in r if (not x["p"]) and (lambda d: d.get("unknown_hard") and not d.get("excluded"))(json.loads(x["d"]))),
             "favourites": db.q1("SELECT COUNT(*) c FROM listings WHERE favourite=1 AND active=1")["c"]}
 
 @app.get("/api/listings/{lid}")

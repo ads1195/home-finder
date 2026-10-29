@@ -20,7 +20,7 @@ MIN_GAP = 600                    # ...and never more often than this (seconds), 
 logger = print                   # engine.py swaps in its progress log
 _lock = threading.RLock()
 _wlock = threading.Lock()        # one writer at a time
-D = {"v": 1, "w": 0, "entries": {}, "hidden": {}, "favs": {}}
+D = {"v": 1, "w": 0, "entries": {}, "hidden": {}, "favs": {}, "crime": {}}
 _idx = {}                        # "source:source_id" -> entry id
 _sha = None
 _loaded = False
@@ -70,6 +70,9 @@ def _merge(remote):
         if k not in D["hidden"] or v[1] > D["hidden"][k][1]: D["hidden"][k] = v
     for u, it in (remote.get("favs") or {}).items():
         if u not in D["favs"] or (it.get("updated") or 0) > (D["favs"][u].get("updated") or 0): D["favs"][u] = it
+    cr = D.setdefault("crime", {})
+    for k, v in (remote.get("crime") or {}).items():
+        if k not in cr or v.get("t", 0) > cr[k].get("t", 0): cr[k] = v
     D["w"] = max(D.get("w") or 0, remote.get("w") or 0)
     _reindex()
 
@@ -99,6 +102,7 @@ def _prune():
     cut = time.time() - PRUNE_DAYS * 86400
     for eid in [k for k, e in D["entries"].items() if (e.get("seen") or 0) < cut]: D["entries"].pop(eid, None)
     for k in [k for k, v in D["hidden"].items() if v[1] < cut]: D["hidden"].pop(k, None)
+    for k in [k for k, v in D.get("crime", {}).items() if v.get("t", 0) < time.time() - 150 * 86400]: D["crime"].pop(k, None)
     _reindex()
 
 def _write_now(need=True):
@@ -323,3 +327,8 @@ def set_favs(items):
 
 def status():
     return {**stats, "entries": len(D["entries"])}
+
+def touch():
+    """mark the cache as changed (crime lookups etc.) so the next write includes it"""
+    global _dirty
+    _dirty = True
