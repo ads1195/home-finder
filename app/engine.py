@@ -2,7 +2,7 @@
 import os, json, re, threading, time, traceback
 from pathlib import Path
 import numpy as np
-from . import db, geo, http, textanalysis, layout, embed, vision, refs, notify, stations, push, favs
+from . import db, geo, http, textanalysis, layout, embed, vision, refs, notify, stations, push, favs, cache
 from .config import DATA
 from .engine_io import fetch_file
 from .matcher import evaluate, listing_text
@@ -16,6 +16,7 @@ JSONF = ("features", "images", "floorplans", "extra")
 def log(msg):
     state["progress"].append(f"{time.strftime('%H:%M:%S')} {msg}")
     state["progress"] = state["progress"][-80:]
+cache.logger = log
 
 # ---------------- dedupe / ingest ----------------
 def street_key(addr):
@@ -125,35 +126,38 @@ def analyse_listing(lid, cfg, force=False):
     sig = f"{len(l['description'])}|{len(l['images'])}|{len(l['floorplans'])}|{len(l['features'])}"
     prev = json.loads(old["data"]) if old else {}
     if prev.get("sig") == sig and not force: return prev
+    if not force:
+        hit = cache.restore_analysis(lid, l, sig)     # floor-plan OCR + photo vectors from the persistent cache
+        if hit: return hit
     an = {"sig": sig, "updated": time.time()}
     base_text = listing_text(l)
     d = img_dir(lid)
     # floorplans -> OCR
-    fpres, fpfiles = [], []
+    fpres, fpfiles, fpurls = [], [], []
     if layout.ocr_available():
         for i, u in enumerate(l["floorplans"][: (2 if os.environ.get("PROPDASH_LEAN") == "1" else 3)]):
             p = fetch_file(u, d / f"floorplan{i}.jpg", 0.2)
-            if p: fpfiles.append(p)
+            if p: fpfiles.append(p); fpurls.append(u)
         for p, (r, err) in zip(fpfiles, layout.analyse_floorplans(fpfiles)):
             if r: fpres.append(r)
             if err: an.setdefault("errors", []).append(f"OCR {p.name}: {err}")
         fpfiles = [p.name for p in fpfiles]
-    an["floorplan_files"] = fpfiles
+    an["floorplan_files"] = fpfiles; an["floorplan_urls"] = fpurls
     fp = layout.combine(fpres) if fpres else None
     if fp: 
         an["floorplan"] = fp; an["floorplan_text"] = layout.floorplan_text(fp)
     an["text"] = textanalysis.evaluate_text(base_text + "\n" + an.get("floorplan_text", ""))
     # photos -> embeddings (+ vision)
-    photos = []
+    photos, photo_urls = [], []
     if cfg["poll"].get("analyse_photos_for_candidates", True):
         for i, u in enumerate(l["images"][: cfg["poll"].get("max_photos_per_listing", 12)]):
             p = fetch_file(u, d / f"photo{i}.jpg", 0.15)
-            if p: photos.append(p)
+            if p: photos.append(p); photo_urls.append(u)
         embs = embed.embed_many(photos)
         embs = [e for e in embs if e is not None]
         if embs: np.save(d / "emb.npy", np.stack(embs))
         an["n_photos"] = len(photos); an["embed_backend"] = embed.status["backend"]
-    an["photo_files"] = [p.name for p in photos]
+    an["photo_files"] = [p.name for p in photos]; an["photo_urls"] = photo_urls
     vcfg = cfg.get("vision", {})
     if vision.available(vcfg):
         paths = [d / f for f in fpfiles] + photos
@@ -163,6 +167,7 @@ def analyse_listing(lid, cfg, force=False):
     else:
         an["vision"] = {"available": False, "reason": "no API key configured (set PROPDASH_VISION_API_KEY and enable in Settings)"}
     db.x("INSERT OR REPLACE INTO analysis(listing_id,data,updated) VALUES(?,?,?)", (lid, json.dumps(an), time.time()))
+    cache.record(lid, analysed=True)
     return an
 
 def listing_embs(lid):
@@ -184,8 +189,11 @@ def compute_routes(l, cfg, do_route=True):
         s = geo.haversine_km(l["lat"], l["lon"], a["lat"], a["lon"])
         prev = db.q1("SELECT * FROM routes WHERE listing_id=? AND anchor=?", (l["id"], a["name"]))
         if s <= a["max_straight_km"] and do_route:
-            r = geo.route(l["lat"], l["lon"], a["lat"], a["lon"])
-            row = {"straight_km": s, "drive_min": r["drive_min"], "drive_km": r["drive_km"], "method": r["method"]}
+            row = cache.cached_route(l, a)
+            if row: row = {**row, "straight_km": s}
+            else:
+                r = geo.route(l["lat"], l["lon"], a["lat"], a["lon"])
+                row = {"straight_km": s, "drive_min": r["drive_min"], "drive_km": r["drive_km"], "method": r["method"]}
         elif prev and abs(prev["straight_km"] - s) < 0.05:
             row = {k: prev[k] for k in ("straight_km", "drive_min", "drive_km", "method")}
         else:
@@ -284,6 +292,7 @@ def run_poll(trigger="manual"):
     try:
         state.update(running=True, started=time.time(), trigger=trigger, last_error=None, progress=[])
         cfg = db.config()
+        cache.load()      # persistent analysis cache (no-op if not configured / unreachable)
         baseline = not db.get_setting("baseline_done", False)
         log("poll started" + (" (baseline run: first batch is not pushed externally)" if baseline else ""))
         try: refs.scan_folder()
@@ -303,7 +312,9 @@ def run_poll(trigger="manual"):
                 ids = []
                 for n in res:
                     n["agent"] = n.get("agent") or sc["name"]
+                    n = cache.apply_detail(n)
                     lid, is_new = ingest(n); ids.append((lid, n["source_id"]))
+                    if is_new: cache.apply_hidden(lid)
                     pending.append((src, n["source"], n["source_id"], lid))
                 set_status(sid, state="ok", name=sc["name"], type=sc["type"], url=sc.get("url"), last_run=time.time(), count=len(res),
                            message=f"{len(res)} listings fetched" + (f" ({len(src.warnings)} warnings)" if src.warnings else ""),
@@ -372,6 +383,11 @@ def run_poll(trigger="manual"):
         state.update(finished=time.time())
         db.set_setting("last_poll", {"finished": time.time(), "trigger": trigger})
         log("poll finished")
+        try:
+            cache.record_all()
+            st = cache.status()
+            if st["enabled"]: log(f"cache: {st['entries']} entries, analysis hits {st['hits_analysis']}, misses {st['misses_analysis']}, detail hits {st['hits_detail']}, writes {st['writes']}" + (f", error {st['last_error']}" if st["last_error"] else ""))
+        except Exception as e: log(f"cache save failed: {e}")
         return True
     except Exception as e:
         state["last_error"] = f"{type(e).__name__}: {e}"; traceback.print_exc(); log("poll crashed: " + state["last_error"]); return False

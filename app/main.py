@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request, Response, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from . import db, engine, geo, refs, push, embed, vision, layout, favs, http as phttp
+from . import db, engine, geo, refs, push, embed, vision, layout, favs, cache, http as phttp
 from .config import DATA, ROOT, default_config
 from .sources.agent import detect_platform
 from .notify import dispatch
@@ -85,9 +85,14 @@ def media_url(lid, fname): return f"/media/images/{lid}/{fname}"
 
 def local_media(l, an):
     d = DATA / "images" / str(l["id"])
-    photos = [media_url(l["id"], f) for f in (an or {}).get("photo_files", []) if (d / f).exists()]
-    fps = [media_url(l["id"], f) for f in (an or {}).get("floorplan_files", []) if (d / f).exists()]
-    return photos, fps
+    def pick(files, urls):
+        out = []
+        for i, f in enumerate(files):
+            if (d / f).exists(): out.append(media_url(l["id"], f))
+            elif i < len(urls or []): out.append(urls[i])      # restored from the cache: use the original image URL
+        return out
+    an = an or {}
+    return pick(an.get("photo_files", []), an.get("photo_urls")), pick(an.get("floorplan_files", []), an.get("floorplan_urls"))
 
 def card(l, ev, an, srcs, url=None, boost=0):
     ph, _ = local_media(l, an)
@@ -165,7 +170,7 @@ def listing_detail(lid: int):
 
 @app.post("/api/listings/{lid}/{action}")
 def listing_action(lid: int, action: str):
-    if action == "hide": db.x("UPDATE listings SET hidden=1-hidden WHERE id=?", (lid,))
+    if action == "hide": db.x("UPDATE listings SET hidden=1-hidden WHERE id=?", (lid,)); cache.set_hidden(lid)
     elif action == "favourite": db.x("UPDATE listings SET favourite=1-favourite WHERE id=?", (lid,))
     elif action == "reanalyse":
         cfg = db.config(); engine.analyse_listing(lid, cfg, force=True); engine.evaluate_listing(lid, cfg, refs.reference_set() if any(refs.reference_set()) else None)
@@ -177,7 +182,9 @@ def listing_action(lid: int, action: str):
 async def favourites_sync(request: Request):
     """Browser localStorage is the master copy; this merges (last-write-wins per url) and returns the merged map."""
     j = await request.json()
-    return {"items": favs.merge(j.get("items") or {})}
+    merged = favs.merge(j.get("items") or {})
+    cache.set_favs(merged)
+    return {"items": merged}
 
 @app.get("/api/favourites/live")
 def favourites_live():
@@ -195,6 +202,12 @@ def favourites_live():
     return {"items": out}
 
 # ------------------------------------------------------------------ state / poll
+def mem_mb():
+    try:
+        v = {l.split(":")[0]: int(l.split()[1]) for l in open("/proc/self/status") if l.startswith(("VmRSS", "VmHWM"))}
+        return {"rss": round(v["VmRSS"] / 1024), "peak": round(v["VmHWM"] / 1024)}
+    except Exception: return None
+
 @app.get("/api/state")
 def get_state():
     cfg = db.config()
@@ -207,7 +220,7 @@ def get_state():
                      "last": db.get_setting("last_poll")},
             "sources": srcs, "counts": counts_summary(), "total_listings": db.q1("SELECT COUNT(*) c FROM listings")["c"],
             "embed": embed.status, "ocr": layout.ocr_available(), "vision": vision.available(cfg["vision"]),
-            "placeholders": cfg.get("placeholders", []), "time": time.time()}
+            "placeholders": cfg.get("placeholders", []), "time": time.time(), "cache": cache.status(), "mem_mb": mem_mb()}
 
 @app.post("/api/poll")
 def poll_now():
