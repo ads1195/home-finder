@@ -126,6 +126,13 @@ function cardHtml(c, o = {}) {
   <div class="meta">${facts}</div>
   <div class="drv">${drv ? "Drive " + drv : "Drive times pending"}</div>${o.saved ? noteHtml(Fav.key(c), o.note) : ""}</div></article>`;
 }
+const IDEAL_ST = {beats: ["Better", "ok"], meets: ["Matches", "ok"], short: ["Short", "bad"], unknown: ["Unknown", ""]};
+function idealHtml(v) {
+  const c = v.counts || {};
+  const rows = v.rows.map(r => { const [t, k] = IDEAL_ST[r.status] || ["", ""]; return `<tr><td>${esc(r.label)}<br><small class="hint">ideal: ${esc(r.ideal)}</small></td><td>${esc(r.this)}</td><td><span class="pill ${k}">${t}</span></td></tr>`; }).join("");
+  return `<p>Fit <b>${Math.round(v.fit * 100)}%</b> &middot; ${c.beats || 0} better, ${c.meets || 0} matching, ${c.short || 0} short, ${c.unknown || 0} not confirmed${v.fp_total ? ` <span class="hint">(floorplan measured ${v.fp_known} of ${v.fp_total} key items)</span>` : ""}</p>
+   <table class="t"><tr><th>Feature</th><th>This home</th><th></th></tr>${rows}</table>`;
+}
 const SHORT = {kitchen_family: "Kitchen-diner+family", wc_or_ensuite: "WC/en-suite", utility: "Utility", parking: "Off-street parking", not_overlooked: "Private", garden_size: "Garden"};
 const shortLabel = k => SHORT[k] || k;
 
@@ -159,6 +166,7 @@ async function renderDetail(id) {
      ${d.card && d.card.fav_boost >= 0.5 ? `<p class="hint">♥ Ranked slightly higher because it resembles homes you saved (+${d.card.fav_boost}).</p>` : ""}<p class="hint">First seen ${fdt(l.first_seen)} (Europe/London) · listed on ${d.sightings.length} source(s): ${d.sightings.map(s => esc(s.source)).join(", ")}</p>
    </div>
    <div class="twocol">
+   ${ev && ev.vs_ideal ? sec("vs your ideal home", idealHtml(ev.vs_ideal), true, "ideal") : ""}
    ${ev ? sec("Your checklist", checklistHtml(ev), true, "checklist") : ""}
    ${ev ? sec("vs your current home", vsHtml(ev, d.current_home, an), true, "vs") : ""}
    </div>
@@ -320,11 +328,18 @@ async function pageSources() {
   $("#pn").onclick = async () => { const r = await api("/poll", {method: "POST"}); toast(r.started ? "Polling started…" : "Already running"); setTimeout(pageSources, 4000); };
 }
 
+function idealBox(id) {
+  const rows = (id.rooms || []).map(r => `<tr><td>${esc(r.name)}</td><td>${esc(r.ft || "")}<br><small>${esc(r.dim || "")}</small></td></tr>`).join("");
+  return `<div class="box"><h3>Ideal home (benchmark)</h3><p class="hint">${esc(id.description || "Every listing is compared with this: size, room layout, parking, garden and photos.")}</p>
+   <p><b>${id.bedrooms}</b> bed &middot; ~<b>${(id.sqft || 0).toLocaleString("en-GB")}</b> sq ft${id.m2 ? ` (${id.m2} m\u00b2)` : ""}${id.photo_refs ? ` &middot; ${id.photo_refs} reference photos (vectors only)` : ""}</p>
+   ${rows ? `<table class="t"><tr><th>Room</th><th>Size</th></tr>${rows}</table>` : ""}</div>`;
+}
 async function pageRefs() {
   const p = $("#page"); const d = await api("/refs"); const ch = d.current_home;
   const rooms = (ch.rooms || []);
   const roomTbl = fl => `<table class="t"><tr><th>${fl === "ground" ? "Ground floor" : "First floor"}</th><th>Size</th><th></th></tr>${rooms.filter(r => r.floor === fl).map(r => `<tr><td>${esc(r.name)}</td><td>${esc(r.dim || "")}${r.ft ? `<br><small>${esc(r.ft)}</small>` : ""}</td><td><small>${esc(r.note || "")}</small></td></tr>`).join("")}</table>`;
-  p.innerHTML = `<div class="box"><h3>🏡 Current home — ${esc(ch.address || "baseline")}</h3><p class="hint">${esc(ch.description)}</p>
+  const id = d.ideal;
+  p.innerHTML = `${id ? idealBox(id) : ""}<div class="box"><h3>🏡 Current home — ${esc(ch.address || "baseline")}</h3><p class="hint">${esc(ch.description)}</p>
     ${ch.floorplan ? `<div class="two"><div><img src="/media/refs/${esc(ch.floorplan)}" alt="Current home floorplan" style="width:100%;border-radius:8px;border:1px solid var(--line,#ddd)" class="zoomable"><p class="hint">Gross internal area <b>${ch.sqft} sq ft / ${ch.m2} m²</b> (ground ${(ch.floor_areas_sqft || {}).ground}, first ${(ch.floor_areas_sqft || {}).first}). Floorplan source: see current-home config${ch.source_url ? ` · <a href="${esc(ch.source_url)}" target="_blank" rel="noopener">Rightmove record ↗</a>` : ""}.</p></div><div>${roomTbl("ground")}${roomTbl("first")}</div></div>
     <div class="gal" style="display:flex;gap:6px;overflow-x:auto">${(ch.photos || []).map(f => `<img src="/media/refs/${esc(f)}" loading="lazy" style="height:90px;border-radius:6px">`).join("")}</div>` : ""}
     <div class="frm"><label class="f">Floor area (sq ft) — edit when known<input id="ch_sqft" type="number" value="${ch.sqft ?? ""}"></label><label class="f">Reception rooms<input id="ch_rec" type="number" value="${ch.receptions}"></label></div>

@@ -299,7 +299,7 @@ async def push_unsub(request: Request):
 # ------------------------------------------------------------------ references
 @app.get("/api/refs")
 def get_refs():
-    return {"items": refs.list_refs(), "folder": str(refs.REF_DIR), "embed": embed.status, "current_home": refs.current_home()}
+    return {"items": refs.list_refs(), "folder": str(refs.REF_DIR), "embed": embed.status, "current_home": refs.current_home(), "ideal": ideal_public()}
 
 @app.post("/api/refs/upload")
 async def upload_ref(file: UploadFile = File(...), label: str = Form(""), kind: str = Form("")):
@@ -345,3 +345,10 @@ def manifest(): return FileResponse(STATIC / "manifest.webmanifest", media_type=
 
 @app.get("/")
 def index(): return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
+
+
+def ideal_public():
+    from . import private
+    i = dict(private.ideal_home()); e = i.pop("embeddings", None)
+    i["photo_refs"] = len(private.ideal_embeddings())
+    return i

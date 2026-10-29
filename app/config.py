@@ -74,9 +74,11 @@ DEFAULT_CONFIG = {
             "layout": 5,          # floorplan area / room-count signals
             "station": 2,         # LOW default weight: small bonus only
             "price": 3,           # small bonus for being inside the main budget band
-            "size": 8,            # bonus for floor area bigger than the current home (full marks at size_target_sqft); unknown size = neutral
+            "size": 14,           # floor area vs the ideal home (~1,430 sq ft; mild penalty below ~1,250; bigger is never penalised); unknown = neutral
+            "ideal": 35,          # feature fit vs the ideal home (open-plan kitchen/family, lounge, utility, WC, en-suite, parking, garden ...)
+            "beyond": 3,          # small bonus for things that beat the ideal home
         },
-        "size_target_sqft": 1200,   # 'meaningfully larger than current home' target
+        "size_target_sqft": 1430,   # (informational) the ideal home's floor area; scoring uses the ideal_home benchmark
         "min_score_to_notify": 0,
         # Curated "Top matches": only listings that pass ALL hard filters (no contradicted must-have)
         # AND score >= min_score are shown/notified; capped at max_count (best first).

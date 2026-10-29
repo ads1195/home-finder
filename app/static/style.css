@@ -379,3 +379,5 @@ details.sec>summary{font-weight:600;font-size:.95rem}
 .tools select{max-width:46%}
 @media (max-width:480px){.tabs a small{display:none}.tabs a{padding:7px 14px}.tabs{width:100%;justify-content:space-between}.tabs a{flex:1;justify-content:center}}
 #bottomnav a{min-width:0;font-size:.68rem}
+table.t .pill{box-shadow:none;white-space:nowrap}
+table.t td:nth-child(2){max-width:34%}

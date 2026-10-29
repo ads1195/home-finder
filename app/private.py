@@ -74,3 +74,35 @@ def extra_stations():
 def current_home_default():
     import copy
     return deep_merge(copy.deepcopy(GENERIC_HOME), load().get("current_home"))
+
+
+GENERIC_IDEAL = {   # benchmark "ideal home": target features. Numbers can be overridden by the config JSON key "ideal_home".
+    "label": "Ideal home", "bedrooms": 4, "bathrooms": 2, "detached": True, "sqft": 1430, "m2": 132.7,
+    "size_floor_sqft": 1250,      # below this the size score drops faster
+    "size_beats_sqft": 1600,      # at/above this a listing counts as bigger than the ideal
+    "features": {"open_plan_kitchen_family": True, "bifolds_or_extension": True, "separate_lounge": True, "utility": True,
+                 "downstairs_wc": True, "ensuite": True, "family_bathroom": True, "garage_or_drive": True, "rear_garden": True},
+    "open_plan_m2": 44.0, "lounge_m2": 16.0, "bedroom_m2": [11.0, 9.4, 8.5, 5.4],
+    "rooms": [], "sim_range": [0.55, 0.85], "embeddings": None,
+}
+
+def ideal_home():
+    import copy
+    return deep_merge(copy.deepcopy(GENERIC_IDEAL), load().get("ideal_home"))
+
+_ideal_emb = None
+def ideal_embeddings():
+    """precomputed CLIP vectors of the ideal home's photos (vectors only; no images) -> list of np.float32 arrays"""
+    global _ideal_emb
+    if _ideal_emb is not None: return _ideal_emb
+    out = []
+    try:
+        e = ideal_home().get("embeddings")
+        if e and e.get("b64"):
+            import base64, numpy as np
+            a = np.frombuffer(base64.b64decode(e["b64"]), dtype=np.float16).astype(np.float32).reshape(-1, int(e.get("dim", 512)))
+            out = [r / (np.linalg.norm(r) or 1) for r in a]
+    except Exception as ex:
+        print(f"[private] ideal embeddings unreadable ({type(ex).__name__})", flush=True)
+    _ideal_emb = out
+    return out

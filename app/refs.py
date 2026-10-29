@@ -165,6 +165,11 @@ def reference_set():
             ck = f.get("checklist") or {}
             flags = {k: v == "confirmed" for k, v in ck.items() if k in ("kitchen_family", "utility", "wc_or_ensuite", "parking")}
         if any(flags.values()): layouts.append(flags)
+    from . import private
+    ie = private.ideal_embeddings()
+    if ie:
+        photos = list(photos) + list(ie)
+        layouts.append({"kitchen_family": True, "utility": True, "wc_or_ensuite": True, "parking": True})
     return photos, layouts
 
 def similarity(listing_embs, listing_ck, refset):
@@ -173,7 +178,10 @@ def similarity(listing_embs, listing_ck, refset):
     parts, detail = [], {}
     if photos and listing_embs:
         sims = [max(embed.cos(p, e) for e in listing_embs) for p in photos]
-        m = float(np.mean(sims)); s = min(1, max(0, (m - 0.55) / 0.30))
+        m = float(np.mean(sims))
+        from . import private
+        lo, hi = (private.ideal_home().get("sim_range") or [0.55, 0.85]) if private.ideal_embeddings() else (0.55, 0.85)
+        s = min(1, max(0, (m - lo) / max(0.01, hi - lo)))
         parts.append(("photos", s, 0.6)); detail["photo_cos_mean"] = round(m, 3)
     if layouts:
         vals = []
