@@ -26,7 +26,7 @@ def auth_conf():
     return pw
 
 PASSWORD = None
-PUBLIC = ("/login", "/manifest.webmanifest", "/sw.js", "/icons/", "/static/login", "/healthz")
+PUBLIC = ("/login", "/manifest.webmanifest", "/sw.js", "/icons/", "/static/", "/healthz")
 
 @app.on_event("startup")
 def _startup():

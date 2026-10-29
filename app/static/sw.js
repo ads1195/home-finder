@@ -3,13 +3,19 @@
    - /api/listings*, /api/state, /api/refs...: network-first, fall back to last cached copy (offline)
    - /media/* images: cache-first (stale-while-revalidate)
    Also handles web-push + notification clicks. */
-const VER = "v9";
+const VER = "v10";
 const SHELL = "shell-" + VER, DATA = "data-" + VER, MEDIA = "media-" + VER;
-const SHELL_FILES = ["/", "/static/style.css", "/static/app.js", "/static/favs.js", "/static/vendor/leaflet.js", "/static/vendor/leaflet.css",
+const SHELL_FILES = ["/static/style.css", "/static/app.js", "/static/favs.js", "/static/vendor/leaflet.js", "/static/vendor/leaflet.css",
   "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
+// Never cache an HTML page (e.g. the sign-in page) in place of a CSS/JS/image file.
+function okAsset(path, r) {
+  if (!r || !r.ok) return false;
+  const ct = r.headers.get("content-type") || "";
+  return !(ct.includes("text/html") && !/\.html?$/.test(path) && path !== "/");
+}
 self.addEventListener("install", e => {
-  e.waitUntil(caches.open(SHELL).then(c => c.addAll(SHELL_FILES)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(SHELL).then(c => Promise.all(SHELL_FILES.map(f => fetch(f, {cache: "reload"}).then(r => { if (okAsset(f, r)) return c.put(f, r); }).catch(() => {})))).then(() => self.skipWaiting()));
 });
 self.addEventListener("activate", e => {
   e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => !k.endsWith(VER)).map(k => caches.delete(k)))).then(() => self.clients.claim()));
@@ -31,7 +37,7 @@ self.addEventListener("fetch", e => {
     e.respondWith(fetch(req).catch(() => caches.match("/")));
     return;
   }
-  e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(r => { if (r.ok) { const cp = r.clone(); caches.open(SHELL).then(c => c.put(req, cp)); } return r; })));
+  e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(r => { if (okAsset(u.pathname, r)) { const cp = r.clone(); caches.open(SHELL).then(c => c.put(req, cp)); } return r; })));
 });
 
 self.addEventListener("push", e => {
