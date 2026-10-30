@@ -62,7 +62,7 @@ KNOB_NAME = {
 IDEAL_W = {"kitchen_family": 4, "kitchen_area": 3, "lounge": 3, "lounge_area": 1.5, "utility": 3, "wc": 2.5, "ensuite": 2.5, "bedrooms": 2,
            "bed_sizes": 2, "parking": 1.5, "garden": 2}
 ADJ_MAX = {"condition": 6.0, "crime": 8.0}
-CAP, K = 3.0, 4.0                   # weight multiplier: 1 vote x1.4, 2 x1.67, 5 x2.1, never above 3x
+CAP, K = 2.5, 5.0                   # weight multiplier: 1 vote x1.25, 2 x1.43, 5 x1.75, never above 2.5x (the trait penalties do the heavy lifting)
 AREA_NEAR_M = 500; AREA_NEAR_PEN = 2.0; STREET_PEN = 6.0; NOISE_STREET_PEN = 3.0; FB_MAX = 14.0; STYLE_MAX = 6.0
 DEV_M, DEV_PEN = 120, 4.0           # same street + within ~120 m of ANY home marked 'not for us' (same development / builder)
 TRAIT_PEN = (0, 7, 12, 16, 20)      # points off the score of a home sharing a trait you marked, by number of votes (4+ = 20)
@@ -169,7 +169,7 @@ def _counts():
     return out
 
 def _m(n, cap=CAP): return 1 + (cap - 1) * n / (n + K)
-def _mk(kb, n): return _m(n, 4.0) if kb == "w:openplan" else _m(n)      # the core criterion reacts harder to downvotes
+def _mk(kb, n): return _m(n, 2.2) if kb == "w:openplan" else _m(n)      # the core criterion reacts harder to downvotes
 
 def multipliers():
     """{knob: multiplier >= 1}"""
