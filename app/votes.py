@@ -31,6 +31,7 @@ REASONS = [
     ("other", "Other"),
 ]
 LABEL = dict(REASONS)
+TRAIT_SEV = {"openplan", "lounge", "kitchen_small", "utility", "wc", "beds", "garden", "overlooked", "parking", "condition", "layout", "far", "price"}
 # reason -> scoring knobs ("ck:" checklist weight, "ideal:" row weight in the ideal-home fit, "w:" score_weights, "adj:" additive adjustment)
 KNOBS = {
     "openplan": ["ck:kitchen_family", "ideal:kitchen_family", "w:openplan"],
@@ -61,8 +62,25 @@ KNOB_NAME = {
 IDEAL_W = {"kitchen_family": 4, "kitchen_area": 3, "lounge": 3, "lounge_area": 1.5, "utility": 3, "wc": 2.5, "ensuite": 2.5, "bedrooms": 2,
            "bed_sizes": 2, "parking": 1.5, "garden": 2}
 ADJ_MAX = {"condition": 6.0, "crime": 8.0}
-CAP, K = 2.0, 8.0
-AREA_NEAR_M = 300; AREA_NEAR_PEN = 1.0; STREET_PEN = 2.5; NOISE_STREET_PEN = 1.5; FB_MAX = 5.0; STYLE_MAX = 3.0
+CAP, K = 3.0, 4.0                   # weight multiplier: 1 vote x1.4, 2 x1.67, 5 x2.1, never above 3x
+AREA_NEAR_M = 500; AREA_NEAR_PEN = 2.0; STREET_PEN = 6.0; NOISE_STREET_PEN = 3.0; FB_MAX = 14.0; STYLE_MAX = 6.0
+DEV_M, DEV_PEN = 120, 4.0           # same street + within ~120 m of ANY home marked 'not for us' (same development / builder)
+TRAIT_PEN = (0, 7, 12, 16, 20)      # points off the score of a home sharing a trait you marked, by number of votes (4+ = 20)
+GATE_PEN, GATE_N, TOTAL_MAX = 35.0, 2, 50.0   # a confirmed miss on a core requirement after 2+ votes: near-gate
+CORE_GATE = {"openplan", "utility", "overlooked", "garden", "wc", "parking", "condition", "beds", "lounge"}
+PLACE_PEN = 30.0
+# free-text notes also count: map what was written to the same reasons (so a note-only 'not for us' still teaches something)
+NOTE_MAP = [
+    (r"(see|watch|spot|supervis)\w*\b.{0,40}\b(kids?|child|children)|\bopen[- ]?plan\b|\bkitchen\b.{0,30}\b(separate|closed off|not open)", "openplan"),
+    (r"\b(lounge|living ?room|sitting ?room|reception)\b.{0,50}\b(1st|first|upstairs|top floor)\b|\b(1st|first|upstairs)\b.{0,25}\b(lounge|living)", "lounge"),
+    (r"\bno (separate )?(lounge|living room)\b", "lounge"), (r"\bkitchen\b.{0,25}\b(small|tiny|cramped)", "kitchen_small"),
+    (r"\butility\b", "utility"), (r"\boverlook", "overlooked"), (r"\bgarden\b.{0,20}\b(small|tiny)|\b(small|tiny)\b.{0,12}\bgarden", "garden"),
+    (r"\b(parking|driveway|garage)\b", "parking"), (r"\b(dated|needs work|tired|renovat|refurb|modernis)", "condition"),
+    (r"(don'?t|do not|never|not)\b.{0,25}\b(want|live|like)\b.{0,15}\b(in|near|around|on)\b|\b(area|estate|street|neighbourhood)\b", "area"),
+    (r"\b(noise|noisy|busy road|main road|motorway)\b", "noise"), (r"\b(too far|commute|long drive)\b", "far"),
+    (r"\b(overpriced|too expensive|expensive|poor value)\b", "price"),
+]
+_PLACE = re.compile(r"(?:live in|living in|move to|be in|near|around|avoid)\s+([A-Za-z][A-Za-z' -]{3,24}?)(?=$|[.,;!?]| as | because| it| which| and )", re.I)
 
 _lock = threading.RLock()
 _items = {}            # url -> {url, down, reasons, note, updated, snap, lat, lon, sk, lid}
@@ -128,15 +146,30 @@ def apply():
     return True
 
 # ---------------- learning ----------------
+def eff_reasons(e):
+    """the reasons picked + any implied by the free-text note"""
+    rs = set(e.get("reasons") or [])
+    note = (e.get("note") or "").lower()
+    if note:
+        for rx, r in NOTE_MAP:
+            if re.search(rx, note): rs.add(r)
+    return rs
+
+def note_places(e):
+    """places named in a "don't want to live in X" style note"""
+    note = (e.get("note") or "")
+    if not re.search(r"(don'?t|do not|never|not|avoid)", note, re.I): return []
+    return [m.group(1).strip().lower() for m in _PLACE.finditer(note) if len(m.group(1).strip()) >= 4 and m.group(1).strip().lower() not in ("the area", "this area", "that area", "here", "there")]
+
 def _counts():
     out = {}
     for e in active():
         if e["updated"] / 1000.0 <= _meta["reset"]: continue
-        for r in set(e["reasons"]): out[r] = out.get(r, 0) + 1
+        for r in eff_reasons(e): out[r] = out.get(r, 0) + 1
     return out
 
 def _m(n, cap=CAP): return 1 + (cap - 1) * n / (n + K)
-def _mk(kb, n): return _m(n, 2.5) if kb == "w:openplan" else _m(n)      # the core criterion reacts harder to downvotes
+def _mk(kb, n): return _m(n, 4.0) if kb == "w:openplan" else _m(n)      # the core criterion reacts harder to downvotes
 
 def multipliers():
     """{knob: multiplier >= 1}"""
@@ -159,8 +192,11 @@ def learned(cfg=None):
             base = ckw.get(name) if kind == "ck" else IDEAL_W.get(name) if kind == "ideal" else sw.get(name) if kind == "w" else ADJ_MAX.get(name)
             if base is None: continue
             eff.append({"name": KNOB_NAME.get(kb, kb), "default": base, "now": round(base * (_mk(kb, n) if n else 1.0), 2)})
-        extra = {"area": "+ small penalty for homes within ~300 m / on the same street", "noise": "small penalty for homes on the same street",
-                 "style": "mild penalty for homes whose photos look similar", "other": "recorded only"}.get(r)
+        extra = {"area": "+ penalty for homes within ~500 m / on the same street", "noise": "penalty for homes on the same street",
+                 "style": "penalty for homes whose photos look similar", "other": "recorded only"}.get(r)
+        if n and r in TRAIT_SEV:
+            tp = TRAIT_PEN[min(n, 4)]
+            extra = (extra + "; " if extra else "") + f"homes with this trait lose ~{tp} pts" + (f"; a confirmed miss loses {GATE_PEN:.0f} (near-gate)" if n >= GATE_N and r in CORE_GATE else f" ({GATE_N - n} more vote{'s' if GATE_N - n != 1 else ''} makes it a near-gate)" if r in CORE_GATE else "")
         rows.append({"id": r, "label": label, "count": n, "mult": round(m, 2), "effects": eff, "extra": extra})
     return {"rows": rows, "total": count(), "counted": sum(1 for e in active() if e["updated"] / 1000.0 > _meta["reset"]), "cap": CAP, "reset": _meta["reset"]}
 
@@ -175,18 +211,22 @@ def _hav(la1, lo1, la2, lo2):
 
 def area_penalty(l):
     """-> (points >= 0, [why strings]) for a listing near / on the same street as homes marked 'area' or 'noise'"""
-    near = 0.0; street = 0.0; why = []
+    near = 0.0; street = 0.0; why = []; devs = False
     lat, lon, sk = l.get("lat"), l.get("lon"), l.get("street_key")
     for e in active():
-        rs = e["reasons"]
-        if e["updated"] / 1000.0 <= _meta["reset"] or not ("area" in rs or "noise" in rs): continue
+        if e["updated"] / 1000.0 <= _meta["reset"]: continue
+        rs = eff_reasons(e)
+        dev = bool(rs - {"price", "far", "other"}) or not rs      # any 'not for us' home: neighbours on the same street within ~120 m share builder/layout/traits
+        if not ("area" in rs or "noise" in rs or dev): continue
         d = _hav(lat, lon, e["lat"], e["lon"]) if None not in (lat, lon, e.get("lat"), e.get("lon")) else None
         if d is not None and d < 15: continue                   # the same home
         same = bool(sk and e.get("sk") and sk == e["sk"] and (d is None or d <= 700))
-        if same: street = max(street, STREET_PEN if "area" in rs else NOISE_STREET_PEN)
+        if same and ("area" in rs): street = max(street, STREET_PEN)
+        elif same and ("noise" in rs): street = max(street, NOISE_STREET_PEN)
+        elif same and d is not None and d <= DEV_M: street = max(street, DEV_PEN); devs = True
         elif "area" in rs and d is not None and d <= AREA_NEAR_M: near += AREA_NEAR_PEN
-    pen = min(FB_MAX - 1, street + min(2.0, near))
-    if street: why.append("same street as a home marked not for us")
+    pen = min(FB_MAX - 2, street + min(5.0, near))
+    if street: why.append("same street / development as a home marked not for us")
     if near: why.append("close to homes marked 'area not for us'")
     return pen, why
 
@@ -196,7 +236,7 @@ def _style_state():
     with _lock:
         sv = []; ids = set()
         for e in active():
-            if "style" not in e["reasons"] or e["updated"] / 1000.0 <= _meta["reset"]: continue
+            if not (eff_reasons(e) & {"style", "layout", "condition"}) or e["updated"] / 1000.0 <= _meta["reset"]: continue
             if e.get("lid") is None: _enrich(e)
             if e.get("lid") is None: continue
             v = favs._mean_emb(e["lid"])
@@ -219,16 +259,40 @@ def style_penalty(lid):
     if v is None: return 0.0
     s = max(float(np.dot(v, x)) for x in st["vecs"])
     p = STYLE_MAX * min(1.0, max(0.0, (s - st["lo"]) / (st["hi"] - st["lo"])))
-    p *= len(st["vecs"]) / (len(st["vecs"]) + 4.0)          # damped: one vote is a whisper, five a nudge
+    p *= len(st["vecs"]) / (len(st["vecs"]) + 1.5)          # damped a little: one vote is a nudge, five a firm push
     return round(p, 1) if p >= 0.3 else 0.0
 
+def place_penalty(l):
+    """homes in a place a note says you don't want to live in (e.g. "Don't want to live in X")"""
+    hay = ((l.get("address") or "") + " " + (l.get("title") or "") + " " + (l.get("description") or "")[:1500]).lower()
+    for e in active():
+        if e["updated"] / 1000.0 <= _meta["reset"]: continue
+        for p in note_places(e):
+            if re.search(r"\b" + re.escape(p) + r"\b", hay): return PLACE_PEN, f"you said you don't want to live in {p.title()}"
+    return 0.0, None
+
+def trait_penalty(sev):
+    """sev: {reason: severity 0..1} for this home (how strongly it has the trait).  -> {pen, why[], gate[]}.
+    Penalty only: n votes for a reason take TRAIT_PEN[n] x severity points off homes sharing the trait; after GATE_N votes a
+    confirmed miss on a core requirement takes GATE_PEN off (near-gate).  Reset clears it."""
+    cnt = _counts(); pen = 0.0; why = []; gate = []
+    for r, s in sev.items():
+        n = cnt.get(r, 0)
+        if not n or s <= 0: continue
+        p = TRAIT_PEN[min(n, 4)] * s
+        if n >= GATE_N and s >= 0.95 and r in CORE_GATE: p = max(p, GATE_PEN); gate.append(r)
+        if p >= 0.5: pen += p; why.append(f"{LABEL.get(r, r)} ({n} vote{'s' if n != 1 else ''}) \u2212{p:.0f}")
+    return {"pen": round(min(TOTAL_MAX, pen), 1), "why": why, "gate": gate}
+
 def feedback(l):
-    """{pen, why[]} for evaluate(): small additive penalty from the votes (0 when there are none)"""
+    """{pen, why[]} for evaluate(): additive penalty from the votes (0 when there are none)"""
     if not active(): return None
     pen, why = area_penalty(l)
+    pp, pw = place_penalty(l)
+    if pp: pen += pp; why.append(pw)
     sp = style_penalty(l["id"]) if l.get("id") else 0.0
     if sp: pen += sp; why.append("photos look like homes marked 'style not for us'")
-    pen = round(min(FB_MAX, pen), 1)
+    pen = round(min(FB_MAX + (PLACE_PEN if pp else 0), pen), 1)
     return {"pen": pen, "why": why} if pen else None
 
 # ---------------- pre-highlighted pills ----------------

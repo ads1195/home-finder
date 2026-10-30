@@ -83,6 +83,11 @@ class Rightmove(Source):
         dp = (pr.get("displayPrices") or [{}])[0]
         l["price"] = pr.get("amount"); l["price_text"] = " ".join(x for x in [dp.get("displayPriceQualifier"), dp.get("displayPrice")] if x)
         l["extra"] = {"has_floorplan": bool(p.get("numberOfFloorplans")), "photo_count": p.get("numberOfImages")}
+        lu = p.get("listingUpdate") or {}
+        if lu.get("listingUpdateDate"): l["extra"]["rm_update"] = {"reason": lu.get("listingUpdateReason"), "ts": lu.get("listingUpdateDate")}
+        if p.get("addedOrReduced"): l["extra"]["rm_added"] = str(p["addedOrReduced"])[:60]
+        ds = str(p.get("displayStatus") or "")
+        if re.search(r"sold|stc|offer|reserved|agreed|withdrawn", ds, re.I): l["status_text"] = ds
         return l
 
     def fetch_detail(self, l):

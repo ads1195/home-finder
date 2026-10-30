@@ -117,6 +117,15 @@ async function renderList(tab, selId) {
   $("#sort").onchange = e => { listState.sort = e.target.value; renderList(tab, selId); };
   $$(".card", lv).forEach(el => { el.onclick = e => { if (e.target.closest(".heart,.sharebtn,.downbtn,.note,a")) return; if (el.dataset.ext) return window.open(el.dataset.ext, "_blank", "noopener"); location.hash = `#/${tab}/${el.dataset.id}`; }; if (+el.dataset.id === selId) el.classList.add("sel"); });
 }
+function ageText(a) {
+  if (!a) return "";
+  const dd = n => n == null ? "" : n <= 0 ? "today" : n === 1 ? "yesterday" : n + " days ago";
+  const parts = [];
+  if (a.days != null) parts.push((a.basis === "listed" ? "Listed " : "First seen ") + dd(a.days));
+  if (a.update === "price_reduced" && a.update_days != null) parts.push("Reduced " + dd(a.update_days));
+  else if (a.update === "new" && a.update_days != null && a.days != null && a.update_days + 1 < a.days) parts.push("Re-listed " + dd(a.update_days));
+  return parts.join(" · ");
+}
 const IC = {confirmed: "✓", contradicted: "✗", not_mentioned: "?"};
 function cardHtml(c, o = {}) {
   const drv = Object.entries(c.drive_full || {}).map(([k, v]) => `${esc(k.split(" - ")[0])} ${v.min}m${v.est ? "*" : ""}`).join(" · ");
@@ -124,11 +133,13 @@ function cardHtml(c, o = {}) {
   const opn = c.openplan;
   const opTag = !opn ? "" : opn.state === "confirmed" ? `<span class="pill ok">🛋️ Open-plan${opn.area ? " ~" + Math.round(opn.area) + " m²" : ""}</span>` : opn.state === "unconfirmed" ? '<span class="pill warn">🛋️ Open-plan unconfirmed</span>' : '<span class="pill bad">No open-plan</span>';
   const tag = (c.is_new ? '<span class="pill new">New</span>' : c.band === "just_over" ? '<span class="pill over">Over budget</span>' : "") + opTag;
+  const stc = c.age && c.age.status ? `<span class="pill bad">${esc(c.age.status)}</span>` : "";
+  const agt = ageText(c.age);
   const facts = [`${c.bedrooms ?? "?"} bed`, c.property_type ? esc(c.property_type) : ""].filter(Boolean).join(' <span class="dot2">·</span> ');
-  return `<article class="card" data-id="${c.id}" data-key="${esc(Fav.key(c))}"><div class="ph" ${bg}><div class="tags">${tag}</div>${heartHtml(c)}${shareHtml(c)}${downHtml(c)}${c.score != null ? `<span class="scorebub score">${Math.round(c.score)}</span>` : ""}</div>
+  return `<article class="card" data-id="${c.id}" data-key="${esc(Fav.key(c))}"><div class="ph" ${bg}><div class="tags">${tag}${stc}</div>${heartHtml(c)}${shareHtml(c)}${downHtml(c)}${c.score != null ? `<span class="scorebub score">${Math.round(c.score)}</span>` : ""}</div>
   <div class="body"><div><span class="price">${gbp(c.price)}</span> <span class="scoreinline scorebub">${c.score != null ? Math.round(c.score) : ""}</span></div>
   <div class="addr">${esc(c.address || c.title)}</div>
-  <div class="meta">${facts}</div>
+  <div class="meta">${facts}</div>${agt ? `<div class="drv" style="opacity:.85">🕒 ${esc(agt)}</div>` : ""}
   <div class="drv">${drv ? "Drive " + drv : "Drive times pending"}</div>${o.saved ? noteHtml(Fav.key(c), o.note) : ""}</div></article>`;
 }
 const IDEAL_ST = {beats: ["Better", "ok"], meets: ["Matches", "ok"], short: ["Short", "bad"], unknown: ["Unknown", ""]};
@@ -169,7 +180,7 @@ async function renderDetail(id) {
      <div class="btnrow">${d.sightings.map(s => `<a class="btn pri" href="${esc(s.url)}" target="_blank" rel="noopener">Open on ${esc(s.source)} ↗</a>`).join("")}
        <button class="btn savebtn ${Fav.has(d.card) ? "on" : ""}" id="fav" data-heart="${esc(Fav.key(d.card))}"><span class="hi">${HEART}</span><span class="lbl">${Fav.has(d.card) ? "Saved" : "Save"}</span></button><button class="btn sharedetail" id="shr" data-share="${esc(Fav.key(d.card))}" data-url="${esc((d.sightings[0] || {}).url || "")}"><span class="hi">${SHARE_ICON}</span><span class="lbl">Share</span></button>${downBtnDetail(d.card)}<button class="btn danger" id="hide">${l.hidden ? "Unhide" : "Hide"}</button></div>
      <div id="favnote" ${Fav.has(d.card) ? "" : "hidden"}>${Fav.has(d.card) ? noteHtml(Fav.key(d.card), (Fav.m[Fav.key(d.card)] || {}).note) : ""}</div>
-     ${d.card && d.card.fav_boost >= 0.5 ? `<p class="hint">♥ Ranked slightly higher because it resembles homes you saved (+${d.card.fav_boost}).</p>` : ""}<p class="hint">First seen ${fdt(l.first_seen)} (Europe/London) · listed on ${d.sightings.length} source(s): ${d.sightings.map(s => esc(s.source)).join(", ")}</p>
+     ${d.card && d.card.fav_boost >= 0.5 ? `<p class="hint">♥ Ranked slightly higher because it resembles homes you saved (+${d.card.fav_boost}).</p>` : ""}${d.card && d.card.age && ageText(d.card.age) ? `<p class="hint">🕒 ${esc(ageText(d.card.age))}${d.card.age.status ? " · <b>" + esc(d.card.age.status) + "</b>" : ""}</p>` : ""}${ev && ev.feedback && ev.feedback.why && ev.feedback.why.length ? `<div class="banner" style="margin-top:8px"><b>Marked down because of your 'Not for us' feedback:</b><ul class="plain">${ev.feedback.why.map(r => `<li>${esc(r)}</li>`).join("")}</ul></div>` : ""}<p class="hint">First seen ${fdt(l.first_seen)} (Europe/London) · listed on ${d.sightings.length} source(s): ${d.sightings.map(s => esc(s.source)).join(", ")}</p>
    </div>
    <div class="twocol">
    ${ev && ev.open_plan ? sec("🛋️ Open-plan kitchen / dining / living space (core requirement)", openPlanHtml(ev.open_plan), true, "openplan") : ""}

@@ -1,4 +1,4 @@
-import json, os, secrets, shutil, threading, time, hashlib
+import json, os, re, secrets, shutil, threading, time, hashlib
 from pathlib import Path
 from fastapi import FastAPI, Request, Response, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
@@ -111,6 +111,12 @@ def _filtered_openplan(ev):
     return bool(ev and "no open-plan" in (ev.get("excluded") or []) and ev.get("band") in ("in_budget", "just_over")
                 and all(h["ok"] or h["key"] == "open-plan" for h in ev["hard"]))
 
+def _age(l):
+    fi = engine.fresh_info(l)
+    st = (l.get("status_text") or "")
+    return {"days": fi["age_days"], "basis": fi["basis"], "update": fi["update_reason"], "update_days": fi["update_days"],
+            "fresh_ts": fi["fresh_ts"], "status": st if re.search(r"sold|stc|offer|reserved|agreed|withdrawn", st, re.I) else None}
+
 def card(l, ev, an, srcs, url=None, boost=0):
     ph, _ = local_media(l, an)
     img = (ph[0] if ph else (l["images"][0] if l["images"] else None))
@@ -126,7 +132,8 @@ def card(l, ev, an, srcs, url=None, boost=0):
             "checklist": {k: {"state": v["state"], "label": v["label"], "mode": v["mode"]} for k, v in ck.items()},
             "unconfirmed_must": ev["unconfirmed_must"] if ev else [], "station": ev["station"] if ev else None,
             "similarity": (ev.get("similarity") or {}).get("score") if ev else None,
-            "openplan": _op_card(ev), "is_new": (time.time() - l["first_seen"]) < 48 * 3600}
+            "openplan": _op_card(ev), "is_new": (time.time() - l["first_seen"]) < 48 * 3600, "age": _age(l),
+            "feedback_why": ((ev.get("feedback") or {}).get("why") or [])[:6] if ev else []}
 
 @app.get("/api/listings")
 def listings(tab: str = "matches", q: str = "", sort: str = "score", hidden: int = 0):

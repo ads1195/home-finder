@@ -7,6 +7,8 @@ from . import openplan as _openplan
 from .private import current_home_default as _chd; CURRENT_HOME_DEFAULT = _chd()
 
 
+_SOLD_RX = r"\bsold\b|\bs?stc\b|sold subject|under offer|sale agreed|withdrawn|let agreed|reserved|unpublished|no longer (?:available|on the market)"
+
 def listing_text(l):
     parts = [l.get("title") or "", l.get("address") or "", " ".join(l.get("features") or []), l.get("description") or ""]
     ex = l.get("extra") or {}
@@ -38,7 +40,7 @@ def evaluate(l, routes, analysis, cfg, refs_sim=None, current_home=None):
         if not ok and (status or "fail") == "fail": reasons.append(f"{key}: {detail}")
     # availability
     st = (l.get("status_text") or "").lower()
-    avail = not re.search(r"sold|stc|under offer|sale agreed|withdrawn|let agreed", st)
+    avail = not re.search(_SOLD_RX, st)
     H("available", avail, l.get("status_text") or "on market")
     # price / band
     p = l.get("price"); band = None
@@ -89,6 +91,8 @@ def evaluate(l, routes, analysis, cfg, refs_sim=None, current_home=None):
         H(f"anchor:{a['name']}", ok_s and ok_d, f"{r['straight_km']:.1f} km straight, {r['drive_min']:.0f} min drive{est} (max {a['max_drive_min']} min)")
     # checklist (tri-state)
     ck = merge_checklist(analysis, cfg)
+    for _k in (c.get("core_must") or ["garden_size", "not_overlooked"]):     # core requirements: a contradicted one excludes the home
+        if _k in ck and ck[_k]["mode"] != "off": ck[_k]["mode"] = "must"
     # the core requirement: a proper open-plan kitchen/dining/living (family) space, big enough for a sofa area as well as dining
     op = _openplan.assess(text, (analysis or {}).get("floorplan"), (_ideal_home() or {}).get("open_plan_m2", 44.5), l.get("_photo_open"))
     kf = ck.get("kitchen_family")
@@ -194,6 +198,35 @@ def evaluate(l, routes, analysis, cfg, refs_sim=None, current_home=None):
     cstate = "needs_work" if cond["bad"] else "some_updating" if (cond["mild"] and not cond["good"]) or photo_dated else "ready" if cond["good"] else "unknown"
     condition = {"state": cstate, "label": {"needs_work": "needs work", "some_updating": "some updating", "ready": "move-in ready", "unknown": "no concerns flagged"}[cstate],
                  "bad": cond["bad"], "mild": cond["mild"], "good": cond["good"], "quote": cond.get("quote"), "photo": ph}
+    # ---- core requirements the evidence can't confirm, and the traits you marked 'not for us' (penalties only) ----
+    rowst = {r["key"]: r["status"] for r in vi["rows"]}
+    ncore = [k for k in ("utility", "wc_or_ensuite", "parking", "garden_size", "not_overlooked") if (ck.get(k) or {}).get("state") == "not_mentioned"]
+    core_pen = 2.0 * max(0, len(ncore) - 1)         # one unknown is fine; every further unconfirmed core requirement costs a little
+    if rowst.get("lounge") == "short": core_pen += 6.0
+    if core_pen: adjust["unconfirmed_core"] = -round(core_pen, 1)
+    up_living = bool(re.search(r"(?:1st|first|upper) floor (?:lounge|living|sitting)|(?:lounge|living room|sitting room)[^.]{0,40}(?:1st|first) floor|upstairs (?:lounge|living)|reverse (?:level|living)", low)) or \
+        (any(r.get("type") == "living" for r in (fp.get("rooms") or [])) and not any(r.get("type") == "living" and r.get("floor") in (None, "ground", "unknown") for r in (fp.get("rooms") or [])))
+    def _ckv(k, hard_=1.0, soft=0.35):
+        s = (ck.get(k) or {}).get("state")
+        return hard_ if s == "contradicted" else (soft + (0.35 if (ck.get(k) or {}).get("likely_absent_on_floorplan") else 0)) if s == "not_mentioned" else 0.0
+    sev = {"openplan": 1.0 if op["state"] == "absent" else 0.5 if op["state"] == "unconfirmed" else 0.0,
+           "kitchen_small": 1.0 if rowst.get("kitchen_area") == "short" else 0.0,
+           "lounge": 1.0 if (up_living or rowst.get("lounge") == "short") else 0.0,
+           "utility": _ckv("utility"), "wc": _ckv("wc_or_ensuite"), "parking": _ckv("parking"),
+           "garden": max(_ckv("garden_size", 1.0, 0.25), 1.0 if rowst.get("garden") == "short" and (ck.get("garden_size") or {}).get("state") == "contradicted" else 0.0),
+           "overlooked": _ckv("not_overlooked", 1.0, 0.25),
+           "beds": 1.0 if b is not None and b < c.get("bedrooms_min", 4) else 0.0,
+           "condition": 1.0 if cstate == "needs_work" else 0.6 if cstate == "some_updating" else 0.0,
+           "layout": 0.6 if rowst.get("bed_sizes") == "short" else 0.0,
+           "far": 0.6 if drive and anchors and any((drive.get(a["name"]) or {}).get("drive_min", 0) >= 0.9 * a["max_drive_min"] for a in anchors) else 0.0,
+           "price": 0.6 if band == "just_over" else 0.0}
+    tr = _votes.trait_penalty(sev)
+    if tr["pen"]:
+        adjust["votes"] = -tr["pen"]
+    if core_pen or tr["pen"]:
+        score = round(max(0.0, min(100.0, score - core_pen - tr["pen"])), 1)
+    if tr["pen"]:
+        fb = {"pen": round((fb or {}).get("pen", 0) + tr["pen"], 1), "why": list((fb or {}).get("why", [])) + tr["why"], "gate": tr["gate"]}
     # vs current home
     ch = current_home or CURRENT_HOME_DEFAULT
     vs = {"bedrooms": (b, ch.get("bedrooms")), "bathrooms": (l.get("bathrooms"), ch.get("bathrooms")),

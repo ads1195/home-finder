@@ -19,6 +19,31 @@ def log(msg):
 cache.logger = log
 
 # ---------------- dedupe / ingest ----------------
+def _ts(s):
+    """ISO string / dd/mm/yyyy / epoch -> epoch seconds (None when unreadable)"""
+    if s is None or s == "": return None
+    if isinstance(s, (int, float)): return float(s) / (1000.0 if s > 1e11 else 1.0)
+    s = str(s).strip()
+    try:
+        import datetime as _dt
+        if re.match(r"\d{1,2}/\d{1,2}/\d{4}", s): return _dt.datetime.strptime(s[:10], "%d/%m/%Y").replace(tzinfo=_dt.timezone.utc).timestamp()
+        d = _dt.datetime.fromisoformat(s.replace("Z", "+00:00")[:32])
+        return (d if d.tzinfo else d.replace(tzinfo=_dt.timezone.utc)).timestamp()
+    except Exception: return None
+
+def fresh_info(l, now=None):
+    """When was this home listed / last (re)listed or reduced, per Rightmove's own dates (first-seen only as a labelled fallback)."""
+    now = now or time.time()
+    ex = l.get("extra") or {}
+    lt = _ts(l.get("listed_at")); ru = ex.get("rm_update") or {}; ut = _ts(ru.get("ts"))
+    reason = ru.get("reason") if ut else None
+    basis = "listed" if lt else "seen"
+    base = lt or l.get("first_seen")
+    ft = max([t for t in (lt, ut) if t] or [l.get("first_seen") or now])
+    return {"listed_ts": lt, "update_reason": reason, "update_ts": ut, "fresh_ts": ft, "basis": basis,
+            "age_days": int(max(0, now - base) // 86400) if base else None,
+            "update_days": int(max(0, now - ut) // 86400) if ut else None}
+
 def street_key(addr):
     a = (addr or "").split(",")[0].lower()
     a = re.sub(r"\b(flat|apartment|plot|unit)\s*\w+\b", "", a)
@@ -99,7 +124,7 @@ def is_candidate(l, cfg):
     if l.get("price") and not (c["price_min"] * 0.9 <= l["price"] <= c["price_stretch_max"]): return False
     if l.get("bedrooms") and l["bedrooms"] < c["bedrooms_min"]: return False
     st = (l.get("status_text") or "").lower()
-    if re.search(r"sold|stc|under offer|sale agreed", st): return False
+    if re.search(r"sold|\bs?stc\b|under offer|sale agreed|reserved|withdrawn|unpublished", st): return False
     if avoid.check(l, c.get("avoid_areas")): return False      # private list of areas to avoid: don't spend calls on them
     ok = True
     t = ((l.get("property_type") or "") + " " + (l.get("title") or "")).lower()
@@ -247,7 +272,8 @@ def curated(cfg=None):
     cfg = cfg or db.config()
     tm = cfg["criteria"].get("top_matches") or {}
     rows = db.q("""SELECT e.listing_id id, e.score s, e.band b, json_extract(e.data, '$.open_plan.state') op FROM evaluation e JOIN listings l ON l.id=e.listing_id
-                   WHERE l.active=1 AND l.hidden=0 AND l.down=0 AND e.passes=1 ORDER BY e.score DESC""")
+                   WHERE l.active=1 AND l.hidden=0 AND l.down=0 AND e.passes=1
+                   AND l.last_seen >= (SELECT COALESCE(MAX(last_seen), 0) FROM listings) - 22 * 3600 ORDER BY e.score DESC""")   # a home the searches stopped returning ~a day ago has probably gone under offer / been withdrawn
     out = {"matches": [], "just_over": [], "passing": {"matches": 0, "just_over": 0}}
     try: bst = favs.boosts()      # modest 'similar to your saved homes' nudge (passing listings only, capped)
     except Exception: bst = {}
@@ -277,6 +303,7 @@ def maybe_notify(lid, ev, cfg, baseline):
     if kind == "just_over" and not c.get("notify_just_over_budget", True): return
     if db.q1("SELECT id FROM notifications WHERE listing_id=? AND kind=?", (lid, kind)): return
     l = get_listing(lid)
+    if not baseline and fresh_info(l)["fresh_ts"] < time.time() - 3 * 86400: return     # alerts are for NEW (or newly reduced / re-listed) homes: an old home that only just entered the lists through scoring stays quiet
     n = message_for(l, ev, kind)
     db.x("INSERT OR IGNORE INTO notifications(listing_id,kind,message,created,baseline) VALUES(?,?,?,?,?)",
          (lid, kind, json.dumps(n), time.time(), int(baseline)))
