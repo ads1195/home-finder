@@ -104,7 +104,7 @@ def local_media(l, an):
 def _op_card(ev):
     o = (ev or {}).get("open_plan")
     if not o: return None
-    return {"state": o["state"], "area": o.get("area_m2"), "size": o.get("size"), "why": o.get("why"), "basis": o.get("basis")}
+    return {"state": o["state"], "area": o.get("area_m2"), "size": o.get("size"), "why": o.get("why"), "basis": o.get("basis"), "variant": o.get("variant")}
 
 def _filtered_openplan(ev):
     """homes that would otherwise be matches (in or just over budget, every other hard filter met) but have no open-plan kitchen/family space"""

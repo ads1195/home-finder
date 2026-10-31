@@ -131,7 +131,7 @@ function cardHtml(c, o = {}) {
   const drv = Object.entries(c.drive_full || {}).map(([k, v]) => `${esc(k.split(" - ")[0])} ${v.min}m${v.est ? "*" : ""}`).join(" · ");
   const bg = c.image ? `style="background-image:url('${esc(c.image)}')"` : "";
   const opn = c.openplan;
-  const opTag = !opn ? "" : opn.state === "confirmed" ? `<span class="pill ok">🛋️ Open-plan${opn.area ? " ~" + Math.round(opn.area) + " m²" : ""}</span>` : opn.state === "unconfirmed" ? '<span class="pill warn">🛋️ Open-plan unconfirmed</span>' : '<span class="pill bad">No open-plan</span>';
+  const opTag = !opn ? "" : opn.state === "confirmed" && opn.variant === "kd_snug" ? `<span class="pill ok">🛋️ Kitchen-diner + snug${opn.area ? " ~" + Math.round(opn.area) + " m²" : ""}</span>` : opn.state === "confirmed" ? `<span class="pill ok">🛋️ Open-plan${opn.area ? " ~" + Math.round(opn.area) + " m²" : ""}</span>` : opn.state === "unconfirmed" ? '<span class="pill warn">🛋️ Open-plan unconfirmed</span>' : '<span class="pill bad">No open-plan</span>';
   const tag = (c.is_new ? '<span class="pill new">New</span>' : c.band === "just_over" ? '<span class="pill over">Over budget</span>' : "") + opTag;
   const stc = c.age && c.age.status ? `<span class="pill bad">${esc(c.age.status)}</span>` : "";
   const agt = ageText(c.age);

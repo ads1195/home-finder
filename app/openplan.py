@@ -35,6 +35,24 @@ NEG = [
     r"\b(?:formal\s+)?dining\s+room\b[^.]{0,60}\band\s+(?:a\s+)?(?:separate\s+)?(?:fitted\s+)?kitchen\b",
     r"\bkitchen\s+(?:and|with)\s+(?:a\s+)?separate\s+(?:dining|breakfast)",
 ]
+# kitchen-diner + an adjoining / open snug, family or sitting area (the second accepted layout; scored a little below a true open-plan family room)
+_SN = r"(?:snug|family\s+(?:area|space|zone)|sitting\s+area|day\s*room)"
+SNUG = [
+    r"\bkitchen\s*[/&+\-]\s*(?:dining(?:\s+room)?|diner|breakfast)\s*[/&+\-]\s*" + _SN,                      # room schedule "Kitchen / Dining / Snug"
+    r"\bkitchen\s*[/&+\-]?\s*(?:diner|dining(?:\s+room)?|breakfast)\b[^.]{0,25}?\b(?:with|and|plus|leading\s+(?:in)?to|opening\s+(?:in)?to|open\s+to|incorporating|including|benefiting\s+from)\s+(?:an?\s+)?(?:adjoining\s+|adjacent\s+|open\s+|cosy\s+|additional\s+)?" + _SN,
+    r"\b" + _SN + r"\b[^.]{0,60}?\b(?:off|adjoining|adjacent\s+to|next\s+to|open\s+to|opens?\s+(?:(?:in)?to|onto)|leads?\s+(?:off|from|to)|accessed\s+(?:from|via))\b[^.]{0,40}\bkitchen",
+    r"\bkitchen\b[^.]{0,40}\b(?:with|has|boasts|featuring|leading\s+to|opening\s+(?:in)?to)\s+(?:an?\s+)?(?:adjoining\s+|adjacent\s+|open\s+|cosy\s+|additional\s+)?" + _SN,
+]
+_csn = None
+def snug_text(text):
+    global _csn
+    if _csn is None: _csn = [re.compile(r, re.I) for r in SNUG]
+    t = re.sub(r"\s+", " ", (text or "").replace("\u2019", "'"))
+    for r in _csn:
+        m = r.search(t)
+        if m and not re.search(r"\bseparate\s+(?:kitchen|snug)\b", m.group(0), re.I): return _snip(t, m)
+    return None
+
 _cs = _cm = _cn = None
 def _c():
     global _cs, _cm, _cn
@@ -100,8 +118,8 @@ def assess(text, fp, ideal_m2=44.5, photo=None):
     fp = fp or {}
     tev, quote = text_evidence(text)
     f = floorplan_evidence(fp)
-    def out(state, q, area, basis, why, size=None):
-        return {"state": state, "q": round(q, 3), "area_m2": round(area, 1) if area else None, "basis": basis, "why": why,
+    def out(state, q, area, basis, why, size=None, variant=None):
+        return {"state": state, "q": round(q, 3), "area_m2": round(area, 1) if area else None, "basis": basis, "why": why, "variant": variant,
                 "size": size or (None if not area else "large" if area >= ideal_m2 * 0.9 else "adequate" if area >= 30 else "small"), "quote": quote}
     # 1) kitchen + living/family explicitly one space
     if f["has_comb"]:
@@ -109,6 +127,21 @@ def assess(text, fp, ideal_m2=44.5, photo=None):
         if a is None or a >= COMB_MIN:
             return out("confirmed", _q(a, ideal_m2) if a else 0.75, a, "floorplan", "kitchen/living space labelled as one room on the plan" + (f" (~{a:.0f} m\u00b2)" if a else ""))
         return out("absent", 0.0, a, "floorplan", f"kitchen/living room is only ~{a:.0f} m\u00b2 - too small for a sofa area")
+    # 1b) kitchen-diner + adjoining/open snug (or family / sitting area): accepted, scored a little below a true ~44 m2 open-plan family room
+    sq_ = snug_text(text)
+    plan_snug = f["has_kd"] and f["adj"] and any(r["type"] == "family" and re.search(r"snug|family|sitting|day\s*room", r.get("label") or "", re.I) and not re.search(r"play|games|study|office", r.get("label") or "", re.I) for r in _rooms(fp))
+    sm_ = None
+    if tev == "strong":
+        t_ = re.sub(r"\s+", " ", (text or "").replace("\u2019", "'"))
+        for r_ in _c()[0]:
+            m_ = r_.search(t_)
+            if m_: sm_ = m_.group(0); break
+    strong_true = tev == "strong" and not re.search(r"snug", sm_ or "", re.I)
+    if not strong_true and (sq_ or plan_snug or tev == "strong"):
+        a = ((f["kd"] or f["kit"] or 0) + (f["fam"] or 0)) or None
+        if sq_: quote = sq_
+        q = 0.66 + 0.14 * min(1.0, a / ideal_m2) if a else 0.7
+        return out("confirmed", min(0.8, q), a, "floorplan" if plan_snug else "text", "kitchen-diner with an adjoining/open snug or family area" + (f" (~{a:.0f} m\u00b2 together)" if a else ""), variant="kd_snug")
     if tev == "strong":
         base = f["kd"] or ((f["kit"] or 0) + ((f["dining"] or 0) if "din" in (quote or "").lower() else 0)) or None
         a = (base or 0) + (f["fam"] or 0) or None
