@@ -143,7 +143,7 @@ def listings(tab: str = "matches", q: str = "", sort: str = "score", hidden: int
     cur = engine.curated()
     try: bst = favs.boosts()
     except Exception: bst = {}
-    top = {"matches": set(cur["matches"]), "just_over": set(cur["just_over"])}
+    top = {"matches": set(cur["matches"]), "just_over": set(cur["just_over"]), "worth": set(cur["worth"])}
     for r in rows:
         if tab == "saved": break
         l = engine._row({k: v for k, v in r.items() if k not in ("ev", "an")})
@@ -163,8 +163,9 @@ def listings(tab: str = "matches", q: str = "", sort: str = "score", hidden: int
     meta = None
     if tab in top:
         jo = tab == "just_over"
-        meta = {"shown": len(top[tab]), "passing": cur["passing"][tab], "min_score": tm.get("just_over_min_score" if jo else "min_score"),
-                "max_count": tm.get("just_over_max_count" if jo else "max_count")}
+        wk = tab == "worth"
+        meta = {"shown": len(top[tab]), "passing": cur["passing"].get(tab) or (cur["passing"]["matches"] + cur["passing"]["just_over"]), "min_score": tm.get("worth_min_score" if wk else "just_over_min_score" if jo else "min_score"),
+                "max_count": tm.get("worth_max_count" if wk else "just_over_max_count" if jo else "max_count"), "worth": wk}
     return {"items": out, "counts": counts, "meta": meta}
 
 def counts_summary():
@@ -173,8 +174,8 @@ def counts_summary():
     m, j = len(cur["matches"]), len(cur["just_over"])
     evs = [json.loads(x["d"]) for x in r]
     unconf = sum(1 for e in evs if _filtered_openplan(e) is False and e.get("passes") and (e.get("open_plan") or {}).get("state") == "unconfirmed")
-    return {"matches": m, "just_over": j, "filtered": sum(1 for e in evs if _filtered_openplan(e)), "openplan_unconfirmed": unconf, "show_all": bool(db.config().get("ui", {}).get("show_all_fetched")),
-            "passing_hidden": (cur["passing"]["matches"] - m) + (cur["passing"]["just_over"] - j), "all": len(r), "unread": db.q1("SELECT COUNT(*) c FROM notifications WHERE read=0")["c"],
+    return {"matches": m, "just_over": j, "worth": len(cur["worth"]), "filtered": sum(1 for e in evs if _filtered_openplan(e)), "openplan_unconfirmed": unconf, "show_all": bool(db.config().get("ui", {}).get("show_all_fetched")),
+            "passing_hidden": max(0, (cur["passing"]["matches"] - m) + (cur["passing"]["just_over"] - j) - len(cur["worth"])), "all": len(r), "unread": db.q1("SELECT COUNT(*) c FROM notifications WHERE read=0")["c"],
             "review": sum(1 for x in r if (not x["p"]) and (lambda d: d.get("unknown_hard") and not d.get("excluded"))(json.loads(x["d"]))),
             "favourites": db.q1("SELECT COUNT(*) c FROM listings WHERE favourite=1 AND active=1")["c"]}
 

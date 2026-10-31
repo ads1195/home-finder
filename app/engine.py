@@ -258,10 +258,10 @@ def evaluate_listing(lid, cfg, refset=None, analyse=True):
     return ev
 
 def message_for(l, ev, kind):
-    tag = "JUST OVER BUDGET · " if kind == "just_over" else ""
+    tag = "JUST OVER BUDGET · " if kind == "just_over" else "WORTH A LOOK · " if kind == "worth" else ""
     d = ev["drive"]
     drv = " · ".join(f'{k.split(" - ")[-1][:22]} {v["drive_min"]:.0f}m' for k, v in d.items())
-    return {"title": f'{tag}New match: {l["bedrooms"]} bed, £{l["price"]:,} – {l["address"][:50]}',
+    return {"title": f'{tag}New {"home" if kind == "worth" else "match"}: {l["bedrooms"]} bed, £{l["price"]:,} – {l["address"][:50]}',
             "body": f'Score {ev["score"]:.0f}/100 · {drv}' + (f' · check: {", ".join(ev["checklist"][k]["label"] for k in ev["unconfirmed_must"])}' if ev["unconfirmed_must"] else "") + (" · open-plan unconfirmed" if (ev.get("open_plan") or {}).get("state") == "unconfirmed" else ""),
             "kind": kind, "listing_id": l["id"], "price": l["price"], "address": l["address"]}
 
@@ -274,32 +274,36 @@ def curated(cfg=None):
     rows = db.q("""SELECT e.listing_id id, e.score s, e.band b, json_extract(e.data, '$.open_plan.state') op FROM evaluation e JOIN listings l ON l.id=e.listing_id
                    WHERE l.active=1 AND l.hidden=0 AND l.down=0 AND e.passes=1
                    AND l.last_seen >= (SELECT COALESCE(MAX(last_seen), 0) FROM listings) - 22 * 3600 ORDER BY e.score DESC""")   # a home the searches stopped returning ~a day ago has probably gone under offer / been withdrawn
-    out = {"matches": [], "just_over": [], "passing": {"matches": 0, "just_over": 0}}
+    out = {"matches": [], "just_over": [], "worth": [], "passing": {"matches": 0, "just_over": 0}}
     try: bst = favs.boosts()      # modest 'similar to your saved homes' nudge (passing listings only, capped)
     except Exception: bst = {}
     rows = sorted(({**r, "s": (r["s"] or 0) + bst.get(r["id"], 0)} for r in rows), key=lambda r: -r["s"])
-    for key, band, ms, mc in (("matches", "in_budget", tm.get("min_score", 65), tm.get("max_count", 10)),
-                              ("just_over", "just_over", tm.get("just_over_min_score", 68), tm.get("just_over_max_count", 5))):
+    taken = set()
+    for key, band, ms, mc in (("matches", "in_budget", tm.get("min_score", 60), tm.get("max_count", 10)),
+                              ("just_over", "just_over", tm.get("just_over_min_score", 62), tm.get("just_over_max_count", 5))):
         pool = [r for r in rows if r["b"] == band]
         out["passing"][key] = len(pool)
-        # open-plan unconfirmed homes are scored down already; they still qualify a little below the cutoff (tagged in the UI), best-first after the confirmed ones
-        um = tm.get("unconfirmed_margin", 10)
-        ok = [r["id"] for r in pool if (r["s"] or 0) >= (ms or 0) - (um if r.get("op") == "unconfirmed" else 0)]
+        # Top lists need a CONFIRMED open-plan kitchen/dining/family space; unconfirmed ones go to 'Worth a look'
+        ok = [r["id"] for r in pool if r.get("op") == "confirmed" and (r["s"] or 0) >= (ms or 0)]
         out[key] = ok[: int(mc)] if mc else ok
+        taken.update(out[key])
+    # 'Worth a look': passes every hard filter (open-plan not clearly absent) but open-plan / other core items are unconfirmed or the score is just under the cut-off
+    wm, wc = tm.get("worth_min_score", 40), tm.get("worth_max_count", 15)
+    out["worth"] = [r["id"] for r in rows if r["id"] not in taken and (r["s"] or 0) >= (wm or 0)][: int(wc) if wc else None]
     return out
 
 def notify_curated(cfg, baseline):
     """Notifications are raised ONLY for listings in the curated top lists."""
     cur = curated(cfg)
-    for key in ("matches", "just_over"):
+    for key in ("matches", "just_over", "worth"):
         for lid in cur[key]:
             e = db.q1("SELECT data FROM evaluation WHERE listing_id=?", (lid,))
-            if e: maybe_notify(lid, json.loads(e["data"]), cfg, baseline)
+            if e: maybe_notify(lid, json.loads(e["data"]), cfg, baseline, "worth" if key == "worth" else None)
 
-def maybe_notify(lid, ev, cfg, baseline):
+def maybe_notify(lid, ev, cfg, baseline, force_kind=None):
     c = cfg["criteria"]
     if not ev["passes"] or ev["score"] < c.get("min_score_to_notify", 0): return
-    kind = "match" if ev["band"] == "in_budget" else "just_over"
+    kind = force_kind or ("match" if ev["band"] == "in_budget" else "just_over")
     if kind == "just_over" and not c.get("notify_just_over_budget", True): return
     if db.q1("SELECT id FROM notifications WHERE listing_id=? AND kind=?", (lid, kind)): return
     l = get_listing(lid)

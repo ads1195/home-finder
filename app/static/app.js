@@ -36,11 +36,11 @@ const ICONS = {
 };
 const NAV = [
   {id: "matches", icon: ICONS.matches, label: "Matches", main: 1}, {id: "just_over", icon: ICONS.just_over, label: "Over budget", main: 1},
-  {id: "all", icon: ICONS.all, label: "All", main: 1}, {id: "feed", icon: ICONS.feed, label: "Feed", main: 1},
+  {id: "worth", icon: ICONS.review, label: "Worth a look", main: 1}, {id: "all", icon: ICONS.all, label: "All"}, {id: "feed", icon: ICONS.feed, label: "Feed", main: 1},
   {id: "filtered", icon: ICONS.review, label: "No open-plan"}, {id: "review", icon: ICONS.review, label: "Needs review"}, {id: "saved", icon: ICONS.saved, label: "Saved"}, {id: "notforus", icon: ICONS.notforus, label: "Not for us"},
   {id: "references", icon: ICONS.references, label: "Reference homes"}, {id: "sources", icon: ICONS.sources, label: "Sources"}, {id: "settings", icon: ICONS.settings, label: "Settings"},
 ];
-const TITLES = {filtered: "Filtered out: no open-plan space", matches: "Top matches", just_over: "Just over budget", all: "All fetched", review: "Needs review", saved: "Saved homes", notforus: "Not for us", feed: "Notifications", references: "Reference homes", sources: "Source status", settings: "Settings"};
+const TITLES = {worth: "Worth a look", filtered: "Filtered out: no open-plan space", matches: "Top matches", just_over: "Just over budget", all: "All fetched", review: "Needs review", saved: "Saved homes", notforus: "Not for us", feed: "Notifications", references: "Reference homes", sources: "Source status", settings: "Settings"};
 function counts() { return (S && S.counts) || {}; }
 function renderNav(route) {
   const c = counts();
@@ -70,7 +70,7 @@ function parse() {
 async function route() {
   const r = parse();
   if (parse().tab === "favourites") { location.replace("#/saved"); return; }
-  const listTabs = ["matches", "just_over", "filtered", "all", "review", "saved"];
+  const listTabs = ["matches", "just_over", "worth", "filtered", "all", "review", "saved"];
   let view = "list";
   if (r.tab === "listing" || (listTabs.includes(r.tab) && r.id)) view = "detail";
   else if (!listTabs.includes(r.tab)) view = "page";
@@ -101,13 +101,13 @@ async function renderList(tab, selId) {
   try { d = await api(`/listings?tab=${tab}&q=${encodeURIComponent(listState.q)}&sort=${listState.sort}`); }
   catch (e) { lv.innerHTML = `<div class="empty">Could not load listings (${esc(e.message)}).</div>`; return; }
   if (d.counts) { S = S || {}; S.counts = d.counts; renderNav(parse()); }
-  const tabs = [["matches", "Top matches"], ["just_over", "Over budget"], ...(d.counts.filtered ? [["filtered", "No open-plan"]] : []), ...(d.counts.show_all ? [["all", "All fetched"], ["review", "Needs review"]] : []), ["saved", "Saved"]];
+  const tabs = [["matches", "Top matches"], ["just_over", "Over budget"], ["worth", "Worth a look"], ...(d.counts.filtered ? [["filtered", "No open-plan"]] : []), ...(d.counts.show_all ? [["all", "All fetched"], ["review", "Needs review"]] : []), ["saved", "Saved"]];
   let savedRows = null; if (tab === "saved") { savedRows = await savedItems(); d.items = savedRows; }
   const sortopts = [["score", "Best score"], ["new", "Newest"], ["price", "Price ↑"]];
   const c = d.counts;
   lv.innerHTML = `<div class="tabs">${tabs.map(([id, l]) => `<a href="#/${id}" class="${id === tab ? "on" : ""} ${id === "just_over" ? "over" : ""}">${l}${id === "saved" ? ` <small>(${Fav.count()})</small>` : (c[id] != null ? ` <small>(${c[id]})</small>` : "")}</a>`).join("")}</div>
    <div class="tools"><input id="q" type="search" placeholder="Search address / text" value="${esc(listState.q)}"><select id="sort">${sortopts.map(([v, l]) => `<option value="${v}" ${v === listState.sort ? "selected" : ""}>${l}</option>`).join("")}</select></div>
-   ${d.meta ? `<div class="banner">Showing the <b>${d.meta.shown}</b> best of ${d.meta.passing} listings that pass every hard filter (score ≥ ${d.meta.min_score}, max ${d.meta.max_count}). Others stay stored but hidden. <a href="#/settings">Change cut-off</a></div>` : ""}
+   ${d.meta && d.meta.worth ? `<div class="banner">🔎 <b>Worth a look</b> — these pass every hard filter (budget, beds, drive, area, condition, available) but the open-plan space or another core item (utility, garden, overlooked…) couldn't be confirmed from the listing, or the score is just under the Top cut-off. Judge from the photos and floor plan. Showing the best ${d.meta.shown}.</div>` : d.meta ? `<div class="banner">Showing the <b>${d.meta.shown}</b> best of ${d.meta.passing} listings that pass every hard filter with a <b>confirmed</b> open-plan space (score ≥ ${d.meta.min_score}, max ${d.meta.max_count}). Homes with an unconfirmed layout are in <a href="#/worth">Worth a look</a>. <a href="#/settings">Change cut-off</a></div>` : ""}
    ${tab === "matches" || tab === "just_over" ? `<div class="banner op">🛋️ <b>Core requirement: an open-plan kitchen/dining/living space</b> big enough for a sofa/TV area as well as dining, so you can watch the kids while cooking. It carries the most weight in the score. ${c.openplan_unconfirmed ? `${c.openplan_unconfirmed} homes with an unconfirmed layout are scored down and tagged <b>open-plan unconfirmed</b>. ` : ""}${c.filtered ? `<a href="#/filtered">${c.filtered} otherwise-matching homes</a> were filtered out for having no open-plan space.` : ""}</div>` : ""}
    ${tab === "filtered" ? '<div class="banner">🚫 <b>Filtered out: no open-plan kitchen/family space</b> — these homes meet the budget, bedrooms and area rules but the plan or description shows a separate kitchen and dining room (or a kitchen-diner with room for a table only). Check the original if you think we got it wrong.</div>' : ""}
    ${tab === "just_over" ? '<div class="banner">💷 <b>Just over budget</b> — strong matches priced above your normal ceiling (within the stretch limit). All other hard criteria are met.</div>' : ""}
@@ -431,7 +431,7 @@ async function pageSettings() {
      ${inp("Notify for ‘just over budget’ matches", "criteria.notify_just_over_budget", "bool")}</div></div></details>
    <details class="sec" open><summary>⭐ Top matches (curated view & notifications)</summary><div class="in"><p class="hint">Only listings that pass every hard filter, have no contradicted must-have <b>and</b> reach the score cut-off appear in the default views and trigger notifications. Everything else is stored but hidden.</p><div class="frm">
      ${inp("Top matches: min score (0–100)", "criteria.top_matches.min_score", "num")}${inp("Top matches: max shown", "criteria.top_matches.max_count", "num")}
-     ${inp("Just over budget: min score", "criteria.top_matches.just_over_min_score", "num")}${inp("Just over budget: max shown", "criteria.top_matches.just_over_max_count", "num")}
+     ${inp("Worth a look: min score", "criteria.top_matches.worth_min_score", "num")}${inp("Worth a look: max shown", "criteria.top_matches.worth_max_count", "num")}${inp("Just over budget: min score", "criteria.top_matches.just_over_min_score", "num")}${inp("Just over budget: max shown", "criteria.top_matches.just_over_max_count", "num")}
      ${inp("Admin: show ‘All fetched’ & ‘Needs review’ tabs", "ui.show_all_fetched", "bool")}</div></div></details>
    <details class="sec" open><summary>📍 Anchors (hard: max drive to EACH)</summary><div class="in">${c.anchors.map((a, i) => `<div class="box"><div class="frm">
       ${inp("Name", `criteria.anchors.${i}.name`)}${inp("Address / street", `criteria.anchors.${i}.address`)}

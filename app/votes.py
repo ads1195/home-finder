@@ -65,8 +65,8 @@ ADJ_MAX = {"condition": 6.0, "crime": 8.0}
 CAP, K = 2.5, 5.0                   # weight multiplier: 1 vote x1.25, 2 x1.43, 5 x1.75, never above 2.5x (the trait penalties do the heavy lifting)
 AREA_NEAR_M = 500; AREA_NEAR_PEN = 2.0; STREET_PEN = 6.0; NOISE_STREET_PEN = 3.0; FB_MAX = 14.0; STYLE_MAX = 6.0
 DEV_M, DEV_PEN = 120, 4.0           # same street + within ~120 m of ANY home marked 'not for us' (same development / builder)
-TRAIT_PEN = (0, 7, 12, 16, 20)      # points off the score of a home sharing a trait you marked, by number of votes (4+ = 20)
-GATE_PEN, GATE_N, TOTAL_MAX = 35.0, 2, 50.0   # a confirmed miss on a core requirement after 2+ votes: near-gate
+TRAIT_PEN = (0, 4, 7, 8.5, 10)      # points off the score of a home sharing a trait you marked, by number of votes (4+ = 10): ranks down, never excludes
+GATE_PEN, GATE_N, TOTAL_MAX = 10.0, 2, 30.0   # a CLEARLY contradicted core requirement after 2+ votes: small extra push (not a gate)
 CORE_GATE = {"openplan", "utility", "overlooked", "garden", "wc", "parking", "condition", "beds", "lounge"}
 PLACE_PEN = 30.0
 # free-text notes also count: map what was written to the same reasons (so a note-only 'not for us' still teaches something)
@@ -196,7 +196,7 @@ def learned(cfg=None):
                  "style": "penalty for homes whose photos look similar", "other": "recorded only"}.get(r)
         if n and r in TRAIT_SEV:
             tp = TRAIT_PEN[min(n, 4)]
-            extra = (extra + "; " if extra else "") + f"homes with this trait lose ~{tp} pts" + (f"; a confirmed miss loses {GATE_PEN:.0f} (near-gate)" if n >= GATE_N and r in CORE_GATE else f" ({GATE_N - n} more vote{'s' if GATE_N - n != 1 else ''} makes it a near-gate)" if r in CORE_GATE else "")
+            extra = (extra + "; " if extra else "") + f"homes with this trait lose ~{tp} pts" + (f"; where it is clearly missing, at least {GATE_PEN:.0f}" if n >= GATE_N and r in CORE_GATE else "")
         rows.append({"id": r, "label": label, "count": n, "mult": round(m, 2), "effects": eff, "extra": extra})
     return {"rows": rows, "total": count(), "counted": sum(1 for e in active() if e["updated"] / 1000.0 > _meta["reset"]), "cap": CAP, "reset": _meta["reset"]}
 

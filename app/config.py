@@ -83,8 +83,9 @@ DEFAULT_CONFIG = {
         "min_score_to_notify": 0,
         # Curated "Top matches": only listings that pass ALL hard filters (no contradicted must-have)
         # AND score >= min_score are shown/notified; capped at max_count (best first).
-        "top_matches": {"min_score": 58, "max_count": 10,
-                        "just_over_min_score": 60, "just_over_max_count": 5},
+        "top_matches": {"min_score": 60, "max_count": 10,
+                        "just_over_min_score": 62, "just_over_max_count": 5,
+                        "worth_min_score": 40, "worth_max_count": 15},
         "notify_just_over_budget": True,
     },
     "sources": [
