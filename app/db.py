@@ -90,8 +90,19 @@ def set_setting(key, value):
     x("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
       (key, json.dumps(value)))
 
+CFG_MIG = 21
+
 def config():
     cfg = get_setting("config") or default_config()
+    if (cfg.get("_mig") or 0) < CFG_MIG:        # v21: read each location's full results, a bigger detail budget and a longer 'Worth a look' list
+        p = cfg.setdefault("poll", {})
+        p["max_pages_per_search"] = max(int(p.get("max_pages_per_search") or 3), 10)
+        p["max_detail_fetches_per_cycle"] = max(int(p.get("max_detail_fetches_per_cycle") or 80), 150)
+        tm = cfg.setdefault("criteria", {}).setdefault("top_matches", {})
+        tm["worth_max_count"] = max(int(tm.get("worth_max_count") or 15), 25)
+        cfg["_mig"] = CFG_MIG
+        set_setting("quiet_until", time.time() + 3 * 3600)      # the first polls after this upgrade backfill older homes: record them silently
+        set_setting("config", cfg)
     # forward-compat: fill new default keys
     d = default_config()
     for k, v in d.items():

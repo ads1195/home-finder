@@ -106,6 +106,11 @@ def _op_card(ev):
     if not o: return None
     return {"state": o["state"], "area": o.get("area_m2"), "size": o.get("size"), "why": o.get("why"), "basis": o.get("basis"), "variant": o.get("variant")}
 
+def _ws_card(ev):
+    w = (ev or {}).get("workspace")
+    if not w or (w.get("tier") == "C" and not w.get("separate")): return None
+    return {"tier": w["tier"], "label": w["label"], "likely": w.get("likely"), "separate": w.get("separate"), "why": w.get("why"), "pts": w.get("pts")}
+
 def _filtered_openplan(ev):
     """homes that would otherwise be matches (in or just over budget, every other hard filter met) but have no open-plan kitchen/family space"""
     return bool(ev and "no open-plan" in (ev.get("excluded") or []) and ev.get("band") in ("in_budget", "just_over")
@@ -132,7 +137,7 @@ def card(l, ev, an, srcs, url=None, boost=0):
             "checklist": {k: {"state": v["state"], "label": v["label"], "mode": v["mode"]} for k, v in ck.items()},
             "unconfirmed_must": ev["unconfirmed_must"] if ev else [], "station": ev["station"] if ev else None,
             "similarity": (ev.get("similarity") or {}).get("score") if ev else None,
-            "openplan": _op_card(ev), "is_new": (time.time() - l["first_seen"]) < 48 * 3600, "age": _age(l),
+            "openplan": _op_card(ev), "workspace": _ws_card(ev), "is_new": (time.time() - l["first_seen"]) < 48 * 3600, "age": _age(l),
             "feedback_why": ((ev.get("feedback") or {}).get("why") or [])[:6] if ev else []}
 
 @app.get("/api/listings")

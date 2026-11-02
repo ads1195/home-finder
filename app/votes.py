@@ -302,7 +302,7 @@ def suspects(ev):
     out = []
     rows = {r["key"]: r for r in (ev.get("vs_ideal") or {}).get("rows", [])}
     def short(*ks): return any((rows.get(k) or {}).get("status") == "short" for k in ks)
-    if short("kitchen_family") or (ev.get("open_plan") or {}).get("state") in ("absent", "unconfirmed"): out.append("openplan")
+    if short("kitchen_family") or (ev.get("open_plan") or {}).get("state") == "absent": out.append("openplan")
     if short("lounge"): out.append("lounge")
     if short("kitchen_area"): out.append("kitchen_small")
     if short("utility"): out.append("utility")

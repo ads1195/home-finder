@@ -51,7 +51,8 @@ class Rightmove(Source):
                 continue
             if not loc:
                 self.warnings.append(f"location {name}: not found on Rightmove"); continue
-            for page in range(poll["max_pages_per_search"]):
+            maxp = max(1, min(int(poll.get("max_pages_per_search") or 3), 15)); total = None
+            for page in range(maxp):
                 params = {"locationIdentifier": loc, "radius": "3.0", "sortType": "6", "channel": "BUY",
                           "index": page * 24, "minBedrooms": criteria["bedrooms_min"],
                           "minPrice": int(criteria["price_min"] * 0.9), "maxPrice": int(criteria["price_stretch_max"]),
@@ -61,11 +62,16 @@ class Rightmove(Source):
                 if not m: raise RuntimeError("Rightmove: __NEXT_DATA__ not found (page layout changed?)")
                 sr = json.loads(m.group(1))["props"]["pageProps"]["searchResults"]
                 props = sr.get("properties", [])
+                if total is None:
+                    try: total = int(str(sr.get("resultCount") or "0").replace(",", "")) or None
+                    except Exception: total = None
                 for p in props:
                     if p["id"] in seen: continue
                     seen.add(p["id"])
                     out.append(self._summary(p))
-                if len(props) < 24: break
+                # a page holds ~25 (the index step is 24): stop at the reported total or a short page
+                if not props or (total and (page + 1) * 24 >= total) or (not total and len(props) < 24): break
+            if total and total > maxp * 24: self.warnings.append(f"{name}: {total} results, read the newest {maxp * 24}")
         return out
 
     def _summary(self, p):

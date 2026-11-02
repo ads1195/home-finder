@@ -24,7 +24,7 @@ class Purplebricks(Source):
     def search(self, criteria, poll):
         out, seen = [], set()
         for name in criteria["search_locations"][:10]:
-            for page in range(1, poll["max_pages_per_search"] + 1):
+            for page in range(1, min(poll["max_pages_per_search"], 3) + 1):
                 params = {"searchRadius": 3, "sortBy": 1, "page": page,
                           "priceFrom": int(criteria["price_min"] * 0.9), "priceTo": int(criteria["price_stretch_max"])}
                 try:

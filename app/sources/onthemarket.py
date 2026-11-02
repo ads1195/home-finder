@@ -14,8 +14,10 @@ class OnTheMarket(Source):
 
     def search(self, criteria, poll):
         out, seen = [], set()
+        maxp = max(1, min(int(poll.get("max_pages_per_search") or 3), 15))
         for name in criteria["search_locations"]:
-            for page in range(1, poll["max_pages_per_search"] + 1):
+            total = None
+            for page in range(1, maxp + 1):
                 params = {"radius": "3.0", "min-bedrooms": criteria["bedrooms_min"],
                           "min-price": int(criteria["price_min"] * 0.9), "max-price": int(criteria["price_stretch_max"]),
                           "sort-field": "update_date", "page": page}
@@ -28,10 +30,17 @@ class OnTheMarket(Source):
                     raise
                 res = _state(r.text)["results"]
                 lst = res.get("list", [])
+                if total is None:
+                    try: total = int(res.get("totalResults") or 0) or None
+                    except Exception: total = None
+                got = 0
                 for p in lst:
+                    got += 1
                     if p["id"] in seen: continue
                     seen.add(p["id"]); out.append(self._summary(p))
-                if len(lst) < 25: break
+                # the page size is 30 (the old "< 25 means the last page" cut some locations short): stop at the reported total or an empty page
+                if not lst or (total and page * 30 >= total) or (not total and len(lst) < 20): break
+            if total and total > maxp * 30: self.warnings.append(f"{name}: {total} results, read the newest {maxp * 30}")
         return out
 
     def _summary(self, p):

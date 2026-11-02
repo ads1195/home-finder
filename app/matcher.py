@@ -3,7 +3,7 @@ import re
 from .geo import haversine_km
 from . import votes as _votes, avoid as _avoid, condition as _cond
 from .private import ideal_home as _ideal_home
-from . import openplan as _openplan
+from . import openplan as _openplan, workspace as _workspace
 from .private import current_home_default as _chd; CURRENT_HOME_DEFAULT = _chd()
 
 
@@ -121,6 +121,8 @@ def evaluate(l, routes, analysis, cfg, refs_sim=None, current_home=None):
     # learned from downvotes: a modest (<= 2x) extra weight, applied ONLY as a penalty where a home falls short of that item -
     # homes that meet it keep their score, so votes never inflate everyone's score
     lw = _votes.multipliers()
+    if op["state"] != "absent":     # 'no open-plan' feedback only bites where it is clearly missing - never because it is merely unconfirmed
+        lw = {k: v for k, v in lw.items() if k not in ("ck:kitchen_family", "ideal:kitchen_family", "w:openplan") or op["state"] == "confirmed"}
     parts = {}
     tot_w = 0.0
     anchors = c.get("anchors", [])
@@ -191,6 +193,8 @@ def evaluate(l, routes, analysis, cfg, refs_sim=None, current_home=None):
     elif ph and ph["n"] >= 2 and ph["dated"] <= 0.12: ca += 1.0
     if ca < 0: ca *= lw.get("adj:condition", 1.0)
     if ca: adjust["condition"] = round(max(-10.0, min(3.0, ca)), 1)
+    wsp = _workspace.assess(b, text, fp)      # room for two people to work (and take confidential calls) at home: a ranking boost only
+    if wsp["pts"]: adjust["workspace"] = wsp["pts"]
     fb = l.get("_fb")
     if fb and fb.get("pen"): adjust["feedback"] = -fb["pen"]
     if adjust: score = round(max(0.0, min(100.0, score + sum(adjust.values()))), 1)
@@ -209,7 +213,7 @@ def evaluate(l, routes, analysis, cfg, refs_sim=None, current_home=None):
     def _ckv(k, hard_=1.0, soft=0.35):
         s = (ck.get(k) or {}).get("state")
         return hard_ if s == "contradicted" else (soft + (0.35 if (ck.get(k) or {}).get("likely_absent_on_floorplan") else 0)) if s == "not_mentioned" else 0.0
-    sev = {"openplan": 1.0 if op["state"] == "absent" else 0.5 if op["state"] == "unconfirmed" else 0.0,
+    sev = {"openplan": 1.0 if op["state"] == "absent" else 0.0,      # clearly absent only (unconfirmed is not a miss)
            "kitchen_small": 1.0 if rowst.get("kitchen_area") == "short" else 0.0,
            "lounge": 1.0 if (up_living or rowst.get("lounge") == "short") else 0.0,
            "utility": _ckv("utility"), "wc": _ckv("wc_or_ensuite"), "parking": _ckv("parking"),
@@ -239,7 +243,7 @@ def evaluate(l, routes, analysis, cfg, refs_sim=None, current_home=None):
             "checklist": ck, "contradicted_must": contradicted, "unconfirmed_must": unknown,
             "score": score, "score_parts": {k: round(v, 2) for k, v in parts.items()}, "workspace_hits": hits,
             "drive": drive, "station": st_, "vs_current": vs, "vs_ideal": vi, "similarity": refs_sim,
-            "excluded": excluded, "open_plan": op, "crime": cr, "condition": condition, "adjust": adjust, "feedback": (fb or None)}
+            "excluded": excluded, "open_plan": op, "workspace": wsp, "crime": cr, "condition": condition, "adjust": adjust, "feedback": (fb or None)}
 
 def merge_checklist(analysis, cfg):
     """Combine text / floorplan / vision evidence into the tri-state checklist."""

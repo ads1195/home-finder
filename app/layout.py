@@ -203,6 +203,20 @@ def _summarise(rooms, texts, heads, diag):
         for f in fam:
             if math.hypot(k["cx"] - f["cx"], k["cy"] - f["cy"]) < 0.25 * diag:
                 adj = True; ev.append(f'"{k["label"]}" is next to "{f["label"]}" on the ground floor')
+    # a living room next to the kitchen with no hall / landing / store between them (a separate lounge down a hall does not count)
+    adj_living = []
+    liv = [r for r in rooms if r["type"] in ("living", "family", "conservatory") and grd(r)]
+    blockers = [r for r in rooms if r["type"] in ("hall", "landing", "storage", "wc", "garage") and grd(r)]
+    for k in kit:
+        for f in liv:
+            dist = math.hypot(k["cx"] - f["cx"], k["cy"] - f["cy"])
+            if dist >= 0.25 * diag or dist < 1: continue
+            vx, vy = f["cx"] - k["cx"], f["cy"] - k["cy"]
+            blocked = False
+            for b in blockers:
+                t = ((b["cx"] - k["cx"]) * vx + (b["cy"] - k["cy"]) * vy) / (dist * dist)
+                if 0.15 < t < 0.85 and abs((b["cx"] - k["cx"]) * vy - (b["cy"] - k["cy"]) * vx) / dist < 0.055 * diag: blocked = True; break
+            if not blocked: adj_living.append(f'"{k["label"]}" next to "{f["label"]}" on the plan, no hall between')
     if kfam: ev.append("Combined kitchen/family label on plan: " + next(r["label"] for r in rooms if r["type"] in ("kitchen_family", "family_kitchen")))
     wc_ground = any(r["type"] == "wc" and grd(r) for r in rooms)
     ensuite = has("ensuite")
@@ -218,11 +232,13 @@ def _summarise(rooms, texts, heads, diag):
     n = len(rooms)
     out = {
         "n_labels": n, "n_dims": sum(1 for r in rooms if "area_m2" in r),
-        "rooms": [{k: v for k, v in r.items() if k in ("type", "label", "floor", "w_m", "h_m", "area_m2", "dim_text", "conf")} for r in rooms],
+        "rooms": [{**{k: v for k, v in r.items() if k in ("type", "label", "floor", "w_m", "h_m", "area_m2", "dim_text", "conf")},
+                   "x": round(r["cx"] / diag, 3), "y": round(r["cy"] / diag, 3)} for r in rooms],
+        "adj_living": adj_living[:4],
         "floors_found": sorted({h[0] for h in heads}),
         "flags": {"kitchen_family": bool(kfam or adj), "kitchen_diner": has("kitchen_diner") or kfam or has("family_kitchen"),
                   "ground_wc": wc_ground, "ensuite": ensuite, "utility": utility, "bedrooms_labelled": bedrooms,
-                  "studies": studies, "receptions": receptions, "garage": has("garage"), "dressing": has("dressing")},
+                  "kitchen_living_adjacent": bool(adj_living), "studies": studies, "receptions": receptions, "garage": has("garage"), "dressing": has("dressing")},
         "area_labelled_m2": round(area, 1), "area_labelled_sqft": int(area * 10.7639),
         "stated": stated, "adjacency_evidence": ev,
         "ocr_text": full[:1500],
@@ -267,10 +283,11 @@ def analyse_floorplans(paths):
 def combine(results):
     """merge multiple floorplan results (several sheets) into one summary"""
     if not results: return None
-    out = {"sheets": len(results), "rooms": [], "flags": {}, "adjacency_evidence": [], "stated": None, "usable": any(r["usable"] for r in results), "n_labels": 0,
+    out = {"sheets": len(results), "rooms": [], "flags": {}, "adjacency_evidence": [], "adj_living": [], "stated": None, "usable": any(r["usable"] for r in results), "n_labels": 0,
            "area_labelled_m2": 0, "files": [r.get("file") for r in results]}
-    for r in results:
-        out["rooms"] += r["rooms"]; out["adjacency_evidence"] += r["adjacency_evidence"]; out["n_labels"] += r["n_labels"]
+    for si, r in enumerate(results):
+        out["rooms"] += [{**x, "sheet": si} for x in r["rooms"]]; out["adjacency_evidence"] += r["adjacency_evidence"]; out["n_labels"] += r["n_labels"]
+        out["adj_living"] += r.get("adj_living") or []
         out["area_labelled_m2"] += r["area_labelled_m2"]
         out["stated"] = out["stated"] or r["stated"]
         for k, v in r["flags"].items():

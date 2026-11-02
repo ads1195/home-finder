@@ -118,6 +118,29 @@ def ingest(n):
          (lid, n["source"], n["source_id"], n["url"], n["price"], now, now, json.dumps({"detail_done": n["detail_done"]})))
     return lid, is_new
 
+gone_n = [0]
+
+def repair_detail_flags():
+    """Homes flagged detail_done although only the search-result snippet was ever stored (cached snippets used to be replayed as 'detail'):
+    clear the flag so the detail page (full text + floor plans) is fetched and analysed properly."""
+    n = 0
+    for r in db.q("SELECT id, extra FROM listings WHERE detail_done=1"):
+        try: ex = json.loads(r["extra"] or "{}")
+        except Exception: ex = {}
+        if cache.full_detail(ex): continue
+        db.x("UPDATE listings SET detail_done=0 WHERE id=?", (r["id"],))
+        db.x("UPDATE sightings SET raw='{\"detail_done\": false}' WHERE listing_id=? AND raw NOT LIKE '%\"gone\"%'", (r["id"],)); n += 1
+    if n: log(f"detail: {n} snippet-only homes re-queued for a real detail fetch")
+    return n
+
+def mark_gone(lid, sname, sid_):
+    """the agent's page answers 410/404: the listing was archived - take it out of play (and stop re-fetching it)"""
+    db.x("UPDATE sightings SET raw=? WHERE source=? AND source_id=?", (json.dumps({"detail_done": True, "gone": True}), sname, sid_))
+    live = db.q1("SELECT 1 FROM sightings WHERE listing_id=? AND raw NOT LIKE '%\"gone\"%' AND last_seen > ?", (lid, time.time() - 2 * 86400))
+    if live: return
+    db.x("UPDATE listings SET status_text='unpublished', detail_done=1, active=0 WHERE id=?", (lid,))
+    gone_n[0] += 1
+
 # ---------------- candidate gate ----------------
 def is_candidate(l, cfg):
     c = cfg["criteria"]
@@ -292,6 +315,10 @@ def curated(cfg=None):
     out["worth"] = [r["id"] for r in rows if r["id"] not in taken and (r["s"] or 0) >= (wm or 0)][: int(wc) if wc else None]
     return out
 
+def _quiet():
+    try: return time.time() < float(db.get_setting("quiet_until", 0) or 0)
+    except Exception: return False
+
 def notify_curated(cfg, baseline):
     """Notifications are raised ONLY for listings in the curated top lists."""
     cur = curated(cfg)
@@ -335,6 +362,7 @@ def run_poll(trigger="manual"):
         cfg = db.config()
         cache.load()      # persistent analysis cache (no-op if not configured / unreachable)
         baseline = not db.get_setting("baseline_done", False)
+        quiet = baseline or _quiet()      # v21 backfill window: homes that only surface because of deeper pages / new rules are recorded, not pushed
         log("poll started" + (" (baseline run: first batch is not pushed externally)" if baseline else ""))
         try: refs.scan_folder()
         except Exception as e: log(f"reference scan failed: {e}")
@@ -372,6 +400,9 @@ def run_poll(trigger="manual"):
                 log(f"{sid}: ERROR {type(e).__name__}: {e}")
         # detail fetch for candidates
         budget = poll.get("max_detail_fetches_per_cycle", 80); fetched = 0
+        gone_n[0] = 0
+        try: repair_detail_flags()
+        except Exception as e: log(f"detail flag repair failed: {e}")
         srcmap = {sc["id"]: sc for sc in cfg["sources"]}
         for src, sname, sid_, lid in pending:
             if fetched >= budget: break
@@ -385,12 +416,14 @@ def run_poll(trigger="manual"):
             n["features"], n["images"], n["floorplans"], n["extra"] = list(l["features"]), list(l["images"]), list(l["floorplans"]), dict(l["extra"])
             try:
                 n = src.fetch_detail(n); fetched += 1
+                if n.get("detail_done"): n["extra"]["full_detail"] = 1       # really fetched (not a search-result snippet)
                 ingest(n)
             except http.Blocked as e:
                 log(f"detail blocked {sname}: {e.reason}")
             except Exception as e:
-                log(f"detail failed {sname} {sid_}: {e}")
-        log(f"detail pages fetched: {fetched}")
+                if re.search(r"HTTP (410|404)\b", str(e)): mark_gone(lid, sname, sid_)      # archived / removed by the agent
+                else: log(f"detail failed {sname} {sid_}: {e}")
+        log(f"detail pages fetched: {fetched}" + (f", {gone_n[0]} archived (410/404) marked inactive" if gone_n[0] else ""))
         try: votes.apply()
         except Exception as e: log(f"votes apply failed: {e}")
         # evaluate everything active
@@ -423,11 +456,12 @@ def run_poll(trigger="manual"):
         except Exception as e: log(f"crime re-score failed: {e}")
         try: state["filters"] = filter_counts()
         except Exception as e: log(f"filter counts failed: {e}")
-        notify_curated(cfg, baseline)
+        notify_curated(cfg, quiet)
         cur = curated(cfg)
         log(f"top matches: {len(cur['matches'])} (of {cur['passing']['matches']} passing) · just over budget: {len(cur['just_over'])} (of {cur['passing']['just_over']} passing)")
         # deactivate stale
         db.x("UPDATE listings SET active=0 WHERE id NOT IN (SELECT listing_id FROM sightings WHERE last_seen > ?)", (time.time() - 3 * 86400,))
+        if quiet and not baseline: db.x("UPDATE notifications SET read=1 WHERE baseline=1")
         if baseline:
             db.set_setting("baseline_done", True)
             db.x("UPDATE notifications SET read=1 WHERE baseline=1")  # first-run backlog is browsable but not an unread badge
@@ -502,7 +536,7 @@ def re_evaluate_all():
             if l.get("lat") is not None: compute_routes(l, cfg, do_route=False)
             evaluate_listing(r["id"], cfg, refset)
         except Exception: traceback.print_exc()
-    try: notify_curated(cfg, not db.get_setting("baseline_done", False))
+    try: notify_curated(cfg, (not db.get_setting("baseline_done", False)) or _quiet())
     except Exception: traceback.print_exc()
 
 _sched = {"thread": None, "stop": False}

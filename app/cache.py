@@ -185,6 +185,12 @@ def media_hash(l, max_photos=12):
 DETAIL_FIELDS = ("title", "address", "postcode", "lat", "lon", "bedrooms", "bathrooms", "property_type", "tenure", "description",
                  "features", "images", "floorplans", "listed_at", "agent", "extra")
 
+def full_detail(extra):
+    """True when the listing's detail PAGE has really been fetched (not just the search-result snippet).
+    New fetches carry extra.full_detail; older ones are recognised by keys only fetch_detail() writes."""
+    e = extra or {}
+    return bool(e.get("full_detail") or "epc" in e or "agent_phone" in e)
+
 # ---------------- ingest-time reuse of the detail page ----------------
 def apply_detail(n):
     """If this listing's detail page is cached (and fresh) fill it into the normalised search result and mark it detail_done."""
@@ -192,7 +198,7 @@ def apply_detail(n):
     try:
         with _lock:
             eid, e = _find([f"{n['source']}:{n['source_id']}"])
-            if not e or not e.get("d") or time.time() - (e.get("dt") or 0) > DETAIL_TTL: return n
+            if not e or not e.get("d") or not full_detail((e["d"] or {}).get("extra")) or time.time() - (e.get("dt") or 0) > DETAIL_TTL: return n   # snippet-only entries never count as detail
             e["seen"] = time.time()
             d = e["d"]
         for k in DETAIL_FIELDS:
@@ -260,8 +266,9 @@ def record(lid, analysed=False):
         if not keys: return
         a = db.q1("SELECT data FROM analysis WHERE listing_id=?", (lid,))
         an = json.loads(a["data"]) if a else None
-        if not (l.get("detail_done") or an): return
-        det = {k: l.get(k) for k in DETAIL_FIELDS}
+        full = bool(l.get("detail_done") and full_detail(l.get("extra")))
+        if not (full or an): return
+        det = {k: l.get(k) for k in DETAIL_FIELDS} if full else None      # a search-result snippet must not be stored as if it were the detail page
         rts = {r["anchor"]: [round(r["straight_km"], 3), round(r["drive_min"], 1), round(r["drive_km"], 2), r["method"]] for r in db.q("SELECT * FROM routes WHERE listing_id=?", (lid,))}
         with _lock:
             eid, e = _find(keys)
@@ -270,11 +277,11 @@ def record(lid, analysed=False):
             if eid in D["entries"]:
                 e["keys"] = sorted(set(e["keys"]) | set(keys))
             for k in keys: _idx[k] = eid
-            changed = e.get("d") != det or e.get("r", {}).get("rt") != rts or e.get("r", {}).get("ll") != [l["lat"], l["lon"]]
+            changed = (det is not None and e.get("d") != det) or e.get("r", {}).get("rt") != rts or e.get("r", {}).get("ll") != [l["lat"], l["lon"]]
             if changed:
-                e["d"] = det
+                if det is not None:
+                    e["d"] = det; e["dt"] = time.time()
                 e["r"] = {"ll": [l["lat"], l["lon"]], "rt": rts}
-                if l.get("detail_done") or not e.get("dt"): e["dt"] = time.time()
             e["seen"] = time.time()
             if an and _complete(an, l):
                 h = media_hash(l)

@@ -43,6 +43,34 @@ SNUG = [
     r"\b" + _SN + r"\b[^.]{0,60}?\b(?:off|adjoining|adjacent\s+to|next\s+to|open\s+to|opens?\s+(?:(?:in)?to|onto)|leads?\s+(?:off|from|to)|accessed\s+(?:from|via))\b[^.]{0,40}\bkitchen",
     r"\bkitchen\b[^.]{0,40}\b(?:with|has|boasts|featuring|leading\s+to|opening\s+(?:in)?to)\s+(?:an?\s+)?(?:adjoining\s+|adjacent\s+|open\s+|cosy\s+|additional\s+)?" + _SN,
 ]
+# the real test (v21): a living / family / snug area that is easily seen from the kitchen (to watch children while cooking) - the layout itself does not matter.
+# L-shape, archway, wide opening, open-to, glazed screen, bi-fold through, "overlooking the family room" all qualify; a separate lounge down a hall does not.
+_KIT = r"(?:kitchen(?:[ /\-]?diner|[ /\-]?breakfast(?:\s+room)?)?|dining[ \-]kitchen)"
+_VLIV = r"(?:snug\b|lounge\b|(?:living|family|sitting|reception|seating|day|play|sun|garden|games)\s*(?:room|area|space|zone)s?\b)"
+_VCON = (r"(?:arch(?:way|es)?|wide\s+(?:opening|doorway|arch|aperture)|(?:large|generous|open|full[- ]width|glazed)\s+(?:opening|archway|aperture|screen|partition)|"
+         r"open(?:s|ing|ed)?\s+(?:up\s+)?(?:(?:in)?to|onto|through)|open\s+to|flow(?:s|ing)?\s+(?:(?:in)?to|through|onto)|leads?\s+through\s+to|through\s+to|walk[- ]through|"
+         r"bi[- ]?fold(?:ing)?(?:\s+doors?)?\s+(?:to|into|between|through)|folding\s+doors?|overlook(?:s|ing)|sightline|open\s+aspect|"
+         r"serving\s+hatch|pass[- ]through)")
+_VT = r"(?:(?!separate|upstairs|bedroom|first\s+floor|\bhall\b|landing|garage)[^.\"*;|\u2022]){0,70}?"
+VISIBLE = [
+    r"\b" + _KIT + r"\b" + _VT + r"\b" + _VCON + r"\b" + _VT + r"\b" + _VLIV + _NODIM,
+    r"\b" + _VLIV + _VT + r"\b" + _VCON + r"\b" + _VT + r"\b" + _KIT + r"\b" + _NODIM,
+    # L-shaped only counts when the living / family space is part of the L (an L-shaped kitchen on its own proves nothing)
+    r"\bl[- ]?shaped\s+(?:open[ \-]plan\s+)?(?:living|family|lounge|sitting)(?:\s*(?:room|area|space))?\s*(?:[/&+,\-]|and)?\s*(?:dining\s*)?(?:[/&+,\-]|and)?\s*kitchen\b",
+    r"\bl[- ]?shaped\s+(?:kitchen|dining[ \-]kitchen|kitchen[ /\-]?diner)\s*(?:[/&+\-]|and)\s*(?:living|family|lounge|sitting|snug)\b",
+    r"\bkitchen\W{0,3}(?:diner|dining)?\W{0,3}(?:living|family|lounge|sitting)\W{0,3}(?:room|area|space)?\W{0,6}(?:is\s+)?l[- ]?shaped\b",
+]
+_cv = None
+def visible_text(text):
+    """-> quote when the text says the living/family area opens off / is in view of the kitchen (not a closed-off lounge), else None"""
+    global _cv
+    if _cv is None: _cv = [re.compile(r, re.I) for r in VISIBLE]
+    t = re.sub(r"\s+", " ", (text or "").replace("\u2019", "'"))
+    for r in _cv:
+        m = r.search(t)
+        if m and not re.search(r"\b(?:separate|formal)\s+(?:lounge|living|sitting|reception|kitchen)\b", m.group(0), re.I): return _snip(t, m)
+    return None
+
 _csn = None
 def snug_text(text):
     global _csn
@@ -103,7 +131,7 @@ def floorplan_evidence(fp):
             "kit": max(kit, default=None), "fam": max(fam, default=None), "dining": max(ar(("dining",)), default=None),
             "living": max(ar(("living",)), default=None),
             "has_fam": has(("family", "conservatory")),
-            "adj": bool(fp.get("adjacency_evidence"))}
+            "adj": bool(fp.get("adjacency_evidence")), "adj_living": list(fp.get("adj_living") or [])}
 
 # thresholds (m2) ---------------------------------------------------------------------------------------------------------
 KD_OK = 32.0        # a kitchen-diner this big has room for a sofa area as well as dining
@@ -142,26 +170,38 @@ def assess(text, fp, ideal_m2=44.5, photo=None):
         if sq_: quote = sq_
         q = 0.66 + 0.14 * min(1.0, a / ideal_m2) if a else 0.7
         return out("confirmed", min(0.8, q), a, "floorplan" if plan_snug else "text", "kitchen-diner with an adjoining/open snug or family area" + (f" (~{a:.0f} m\u00b2 together)" if a else ""), variant="kd_snug")
+    vq = visible_text(text)
     if tev == "strong":
         base = f["kd"] or ((f["kit"] or 0) + ((f["dining"] or 0) if "din" in (quote or "").lower() else 0)) or None
         a = (base or 0) + (f["fam"] or 0) or None
         return out("confirmed", max(0.5, _q(a, ideal_m2)) if a else 0.75, a, "text", "listing describes the kitchen/dining as one space with living/family room" + (f" (~{a:.0f} m\u00b2 on plan)" if a else ""))
     # 2) a kitchen-diner on the plan (or described as open-plan kitchen/dining)
+    def visible_out(a):
+        q = 0.66 + 0.14 * min(1.0, a / ideal_m2) if a else 0.7
+        return out("confirmed", min(0.8, q), a, "text", "living / family area open to the kitchen, easily seen from it" + (f" (~{a:.0f} m\u00b2 kitchen + family space)" if a else ""), variant="visible")
     if f["has_kd"] or tev == "medium":
         a = f["kd"]
         if a is None and f["kit"] and f["dining"] and tev == "medium": a = f["kit"] + f["dining"]
         if a and a >= KD_OK:
             return out("confirmed", _q(a, ideal_m2), a, "floorplan", f"large kitchen-diner (~{a:.0f} m\u00b2) with room for a sofa area")
-        if a and a < KD_MIN and f["ok"]:
+        if vq:
+            quote = vq
+            return visible_out(((f["kd"] or f["kit"] or 0) + (f["fam"] or 0)) or None)
+        if a and a < KD_MIN and f["ok"] and not f["adj_living"]:
             return out("absent", 0.0, a, "floorplan", f"kitchen-diner is only ~{a:.0f} m\u00b2 - room for a table but not a sofa area")
         if a: return out("unconfirmed", 0.4, a, "floorplan", f"kitchen-diner ~{a:.0f} m\u00b2 - check there is room for a sofa area")
         return out("unconfirmed", 0.5, None, "text", "described as open-plan kitchen/dining - size not known, check there is space for a sofa area")
-    # 3) kitchen next to a family room / conservatory on the plan, but nothing says it is open
+    if vq:       # 2b) the text says the living / family area opens off the kitchen (L-shape, archway, wide opening, glazed screen ...)
+        quote = vq
+        return visible_out(((f["kd"] or f["kit"] or 0) + (f["fam"] or 0)) or None)
+    # 3) kitchen next to a family room / conservatory / lounge on the plan (no hall room between), but nothing says it is open
+    if f["adj_living"] and not (f["adj"] and f["has_fam"]):
+        return out("unconfirmed", 0.4, None, "floorplan", "kitchen sits next to a living room on the plan with no hall between - check it is open or in view: " + f["adj_living"][0])
     if f["adj"] and f["has_fam"]:
         a = (f["kit"] or 0) + (f["fam"] or 0) or None
         return out("unconfirmed", 0.35, a, "floorplan", "kitchen sits next to a family room/conservatory on the plan - check it is open-plan")
     # 4) a plan with a kitchen but no open-plan sign: separate kitchen (+ dining) room
-    if f["ok"] and f["has_kitchen"]:
+    if f["ok"] and f["has_kitchen"] and not f["adj_living"]:
         bits = "separate kitchen and dining room" if f["dining"] or tev == "negative" else "separate kitchen"
         return out("absent", 0.0, f["kit"], "floorplan", f"{bits} on the plan, no open-plan family space")
     if tev == "negative":

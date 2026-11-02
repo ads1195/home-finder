@@ -19,8 +19,8 @@ DEFAULT_CONFIG = {
         "enabled": True,
         "interval_minutes": 45,          # 30-60 recommended
         "request_delay_s": 1.5,          # polite delay between requests to the same host
-        "max_pages_per_search": 3,
-        "max_detail_fetches_per_cycle": 80,
+        "max_pages_per_search": 10,
+        "max_detail_fetches_per_cycle": 150,
         "analyse_photos_for_candidates": True,
         "max_photos_per_listing": 12,
     },
@@ -85,7 +85,7 @@ DEFAULT_CONFIG = {
         # AND score >= min_score are shown/notified; capped at max_count (best first).
         "top_matches": {"min_score": 60, "max_count": 10,
                         "just_over_min_score": 62, "just_over_max_count": 5,
-                        "worth_min_score": 40, "worth_max_count": 15},
+                        "worth_min_score": 40, "worth_max_count": 25},
         "notify_just_over_budget": True,
     },
     "sources": [
@@ -121,5 +121,5 @@ def default_config():
     from . import private
     cfg = copy.deepcopy(DEFAULT_CONFIG)
     if os.environ.get("PROPDASH_LEAN") == "1":   # small free hosts: fewer photos / detail fetches per cycle
-        cfg["poll"].update(max_photos_per_listing=4, max_detail_fetches_per_cycle=80)
+        cfg["poll"].update(max_photos_per_listing=4, max_detail_fetches_per_cycle=150)
     return private.finalize_config(cfg)

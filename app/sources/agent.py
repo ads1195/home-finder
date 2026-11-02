@@ -158,12 +158,12 @@ class AgentSite(Source):
             q = {"instruction_type": "Sale", "department": "Residential", "showstc": "off", "bedrooms": criteria["bedrooms_min"],
                  "minprice": int(criteria["price_min"] * 0.9), "maxprice": int(criteria["price_stretch_max"])}
             qs = "&".join(f"{k}={v}" for k, v in q.items())
-            return [f"{self.base}/search/{p}.html?{qs}" for p in range(1, poll["max_pages_per_search"] + 1)]
+            return [f"{self.base}/search/{p}.html?{qs}" for p in range(1, min(poll["max_pages_per_search"], 3) + 1)]
         if t == "wppf":
-            return [f"{self.base}/property/?wppf_search=to-buy"] + [f"{self.base}/property/page/{p}/?wppf_search=to-buy" for p in range(2, poll["max_pages_per_search"] + 3)]
+            return [f"{self.base}/property/?wppf_search=to-buy"] + [f"{self.base}/property/page/{p}/?wppf_search=to-buy" for p in range(2, min(poll["max_pages_per_search"], 3) + 3)]
         if t == "propertyhive":
             return [f"{self.base}/properties/?department=residential-sales&minimum_bedrooms={criteria['bedrooms_min']}"] + \
-                   [f"{self.base}/properties/page/{p}/?department=residential-sales&minimum_bedrooms={criteria['bedrooms_min']}" for p in range(2, poll["max_pages_per_search"] + 1)]
+                   [f"{self.base}/properties/page/{p}/?department=residential-sales&minimum_bedrooms={criteria['bedrooms_min']}" for p in range(2, min(poll["max_pages_per_search"], 3) + 1)]
         paths = ["/", "/properties-for-sale/", "/property-for-sale/", "/properties/", "/buy/", "/for-sale/", "/search/?instruction_type=Sale", "/property/"]
         return [self.base + p for p in paths]
 
