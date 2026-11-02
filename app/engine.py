@@ -370,6 +370,7 @@ def run_poll(trigger="manual"):
         ensure_anchor_coords(cfg)
         cfg = db.config(); crit = cfg["criteria"]
         pending = []   # (source_obj, normalized listing)
+        srcobjs = {}; poll_t0 = time.time()
         ok_sources = 0
         for sc in cfg["sources"]:
             sid = sc["id"]
@@ -377,7 +378,7 @@ def run_poll(trigger="manual"):
                 set_status(sid, state="disabled", name=sc["name"], type=sc["type"], url=sc.get("url")); continue
             t0 = time.time()
             try:
-                src = make_source(sc)
+                src = make_source(sc); srcobjs[sid] = src
                 res = src.search(crit, poll)
                 ids = []
                 for n in res:
@@ -404,6 +405,13 @@ def run_poll(trigger="manual"):
         try: repair_detail_flags()
         except Exception as e: log(f"detail flag repair failed: {e}")
         srcmap = {sc["id"]: sc for sc in cfg["sources"]}
+        stale_prev = {}      # snippet-only homes the searches no longer return: check their page once (archived? or a real detail) without reviving them
+        try:
+            for r in db.q("""SELECT s.source, s.source_id, s.listing_id, l.last_seen FROM sightings s JOIN listings l ON l.id=s.listing_id
+                             WHERE l.active=1 AND l.detail_done=0 AND s.raw NOT LIKE '%"gone"%' AND l.last_seen < ? ORDER BY l.id""", (poll_t0 - 3600,)):
+                if r["source"] in srcobjs and r["listing_id"] not in stale_prev and all(r["listing_id"] != p_[3] for p_ in pending):
+                    stale_prev[r["listing_id"]] = r["last_seen"]; pending.append((srcobjs[r["source"]], r["source"], r["source_id"], r["listing_id"]))
+        except Exception as e: log(f"stale check queue failed: {e}")
         for src, sname, sid_, lid in pending:
             if fetched >= budget: break
             s = db.q1("SELECT raw FROM sightings WHERE source=? AND source_id=?", (sname, sid_))
@@ -418,6 +426,8 @@ def run_poll(trigger="manual"):
                 n = src.fetch_detail(n); fetched += 1
                 if n.get("detail_done"): n["extra"]["full_detail"] = 1       # really fetched (not a search-result snippet)
                 ingest(n)
+                if lid in stale_prev:
+                    db.x("UPDATE listings SET last_seen=? WHERE id=?", (stale_prev[lid], lid))
             except http.Blocked as e:
                 log(f"detail blocked {sname}: {e.reason}")
             except Exception as e:
