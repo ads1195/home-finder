@@ -90,7 +90,7 @@ def set_setting(key, value):
     x("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
       (key, json.dumps(value)))
 
-CFG_MIG = 21
+CFG_MIG = 22
 
 def config():
     cfg = get_setting("config") or default_config()

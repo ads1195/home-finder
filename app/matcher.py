@@ -122,7 +122,7 @@ def evaluate(l, routes, analysis, cfg, refs_sim=None, current_home=None):
     # homes that meet it keep their score, so votes never inflate everyone's score
     lw = _votes.multipliers()
     if op["state"] != "absent":     # 'no open-plan' feedback only bites where it is clearly missing - never because it is merely unconfirmed
-        lw = {k: v for k, v in lw.items() if k not in ("ck:kitchen_family", "ideal:kitchen_family", "w:openplan") or op["state"] == "confirmed"}
+        lw = {k: v for k, v in lw.items() if k not in ("ck:kitchen_family", "ideal:kitchen_family", "w:openplan")}     # v22: a confirmed open-plan home is never marked down by 'no open-plan' votes
     parts = {}
     tot_w = 0.0
     anchors = c.get("anchors", [])
@@ -181,6 +181,7 @@ def evaluate(l, routes, analysis, cfg, refs_sim=None, current_home=None):
         _m = lw.get("w:" + _k)
         _wk = w.get(_k, ow if _k == "openplan" else 0)
         if _m and parts.get(_k) is not None and _wk: lpen += (_m - 1) * _wk * (1 - min(1.0, max(0.0, parts[_k] / _wk)))
+    lpen = min(lpen, 0.08 * tot_w)      # v22: votes teach, but can move a home by at most ~8 points (they had grown to ~20 and emptied the top lists)
     if lpen > 0.001: parts["learned"] = -round(lpen, 3)
     score = round(sum(parts.values()) / tot_w * 100, 1) if tot_w else 0
     # small additive adjustments: crime (-8..+2) and condition (-6..+3)
